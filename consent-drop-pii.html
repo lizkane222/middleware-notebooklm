@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Consent Drop PII Middleware Testing</title>
+
+<script type="text/javascript">
+
+// ===============================
+// GLOBAL FLAGS (Fixed scope/initialization error from conversation history)
+// ===============================
+// Define global flag for PII consent status [2]
+let consentApproved = true; 
+console.log('[PII Middleware] CHECKING USER CONSENT: consentApproved', consentApproved); 
+
+// ===============================
+// STEP 1: SEGMENT ANALYTICS SNIPPET (Part A)
+// ===============================
+!function(){
+var analytics=window.analytics=window.analytics||[];
+if(!analytics.initialize)
+if(analytics.invoked)
+window.console&&console.error&&console.error("Segment snippet included twice.");
+else{
+analytics.invoked=!0;
+analytics.methods=["trackSubmit","trackClick","trackLink","trackForm","pageview","identify","reset","group","track","ready","alias","debug","page","once","off","on","addSourceMiddleware","addIntegrationMiddleware","setAnonymousId","addDestinationMiddleware"];
+analytics.factory=function(e){return function(){var t=Array.prototype.slice.call(arguments);t.unshift(e);analytics.push(t);return analytics}};
+for(var e=0;e<analytics.methods.length;e++){
+var key=analytics.methods[e];
+analytics[key]=analytics.factory(key)
+}
+analytics.load=function(key,e){
+var t=document.createElement("script");
+t.type="text/javascript";
+t.async=!0;
+t.src="https://cdn.segment.com/analytics.js/v1/" + key + "/analytics.min.js";
+
+// CRITICAL FIX IMPLEMENTED: Use index to target a single script element [1]
+var n=document.getElementsByTagName("script")[0]; 
+n.parentNode.insertBefore(t,n); 
+
+analytics._loadOptions=e
+};
+// REPLACE WITH YOUR WRITE KEY
+analytics._writeKey="GHWp3Jhvn2GBHxspEdZBRVhDmJKM4XC1";
+analytics.SNIPPET_VERSION="4.15.3";
+analytics.load("GHWp3Jhvn2GBHxspEdZBRVhDmJKM4XC1");
+analytics.page();
+}
+}();
+
+// ===============================
+// STEP 2: EVENT LOGGER MIDDLEWARE (Part B)
+// ===============================
+analytics.addSourceMiddleware(function({ payload, next }) {
+    setTimeout(function() {
+        if (typeof logToConsole === 'function') {
+            const eventType = payload.obj.type;
+            const eventName = payload.obj.event || eventType;
+            logToConsole(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, 'info');
+            logToConsole(`📡 ${eventType.toUpperCase()} Event: ${eventName}`, 'success');
+            logToConsole(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, 'info');
+            const jsonPayload = JSON.stringify(payload.obj, null, 2);
+            logToConsole(jsonPayload, 'json');
+            logToConsole(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, 'info');
+        } else {
+            console.log('[EVENT LOGGER] Event captured:', payload.obj.type, payload.obj.event || '', payload.obj);
+        }
+    }, 50);
+    next(payload);
+});
+console.log('[EVENT LOGGER] Source middleware registered - all events will be logged to UI console');
+
+// ===============================
+// STEP 3: CONSENT DROP PII MIDDLEWARE LOGIC (Part C)
+// Source middleware for PII redaction [2-6]
+// ===============================
+
+const consentDropPII = function({payload, next, integrations}){
+    try {
+        const event = payload.obj;
+
+        // Step 1: Look for "Consent Preferences Updated" events [3]
+        if (event.type === 'track' && event.event === 'Consent Preferences Updated') {
+            if (event.properties && typeof event.properties.consentApproval === 'boolean') {
+                consentApproved = event.properties.consentApproval;
+            }
+        }
+
+        // Step 2: If consent not approved, sanitize PII fields [3]
+        if (!consentApproved) {
+            
+            // Check properties [4]
+            if (event.properties) {
+                delete event.properties.firstName;
+                delete event.properties.lastName;
+                delete event.properties.email;
+                if (typeof logToConsole === 'function') logToConsole('PII Redacted from Properties: firstName, lastName, email', 'error');
+            }
+
+            // Check traits if it's an identify event [4, 5]
+            if (event.type === 'identify' && event.traits) {
+                delete event.traits.firstName;
+                delete event.traits.lastName;
+                delete event.traits.email;
+                if (typeof logToConsole === 'function') logToConsole('PII Redacted from Traits: firstName, lastName, email', 'error');
+            }
+
+            // Check context traits [5]
+            if (event.context && event.context.traits) {
+                delete event.context.traits.firstName;
+                delete event.context.traits.lastName;
+                delete event.context.traits.email;
+                if (typeof logToConsole === 'function') logToConsole('PII Redacted from Context Traits: firstName, lastName, email', 'error');
+            }
+        }
+
+        // Pass modified payload to the next step [6]
+        next(payload); 
+
+    } catch (e) {
+        console.error('Middleware error:', e);
+        next(payload); // fail open [6]
+    }
+};
+
+analytics.addSourceMiddleware(consentDropPII);
+console.log('[Consent Drop PII] Source Middleware registered.');
+
+// ===============================
+// UI HELPER FUNCTIONS (Part E)
+// ===============================
+
+function logToConsole(message, type = 'info') {
+    const consoleLog = document.getElementById('consoleLog');
+    if (!consoleLog) {
+        console.error('Console log element not found!');
+        return;
+    }
+    const entry = document.createElement('div');
+    entry.className = `log-entry log-${type}`;
+    const timestamp = new Date().toLocaleTimeString();
+    entry.textContent = `[${timestamp}] ${message}`;
+    consoleLog.appendChild(entry);
+    consoleLog.scrollTop = consoleLog.scrollHeight;
+    console.log(message);
+}
+
+function updateStatus() {
+    const anonId = typeof analytics !== 'undefined' && analytics.user ? analytics.user().anonymousId() : 'Not Loaded';
+    document.getElementById('anonymousId').textContent = anonId;
+    const consentStatus = consentApproved ? '✅ Approved' : '❌ Denied (PII Dropping Active)';
+    document.getElementById('consentStatus').innerHTML = consentStatus;
+    const piiNote = consentApproved ? 'PII is being sent.' : 'Middleware is actively removing firstName, lastName, and email.';
+    document.getElementById('piiNote').textContent = piiNote;
+}
+
+
+// ===============================
+// TEST STEP FUNCTIONS (Part F)
+// ===============================
+
+function runStep1() {
+    // Step 1: Initialize user with PII fields
+    logToConsole('[Step 1] Initializing user with PII fields (consent=true)...', 'info');
+    const identifyData = {
+        firstName: "Liz",
+        lastName: "Kane",
+        email: "lkane@twilio.com",
+        title: "Solutions Architect"
+    };
+    
+    if (typeof analytics !== 'undefined') {
+        analytics.identify("user_123", identifyData);
+        logToConsole(`IDENTIFY call sent: user_123, traits: ${JSON.stringify(identifyData)}`, 'success');
+        alert('✓ Step 1 completed: User identified with PII fields. Check the Console Log for the event payload.');
+    } else {
+        logToConsole('ERROR: Analytics not loaded', 'error');
+    }
+    updateStatus();
+}
+
+function runStep2() {
+    // Step 2: Trigger consent denial
+    logToConsole('[Step 2] Triggering consent denial...', 'info');
+    if (typeof analytics !== 'undefined') {
+        analytics.track("Consent Preferences Updated", {
+            consentApproval: false
+        });
+        logToConsole('TRACK call sent: "Consent Preferences Updated", consentApproval: false', 'gclid');
+        alert('✓ Step 2 completed: Consent set to false. PII dropping middleware is now active.');
+    } else {
+        logToConsole('ERROR: Analytics not loaded', 'error');
+    }
+    updateStatus();
+}
+
+function runStep3() {
+    // Step 3: Test PII removal with Identify call
+    logToConsole('[Step 3] Testing PII removal with Identify call (consent=false)...', 'info');
+    if (typeof analytics !== 'undefined') {
+        // This call sends traits persisted from Step 1
+        analytics.identify(); 
+        logToConsole('IDENTIFY call sent (empty parameters).', 'success');
+        logToConsole('Check the event payload above. firstName, lastName, and email should be REMOVED by the middleware.', 'error');
+        alert('✓ Step 3 completed: Identify called. PII fields (firstName, lastName, email) should be removed from the outgoing event payload.');
+    } else {
+        logToConsole('ERROR: Analytics not loaded', 'error');
+    }
+    updateStatus();
+}
+
+function runStep4() {
+    // Step 4: Test removal on a standard track call 
+    logToConsole('[Step 4] Triggering a standard Track event...', 'info');
+    if (typeof analytics !== 'undefined') {
+        analytics.track('PII Drop Test Event', {
+            test_property: 'value',
+            email: 'should_be_removed@test.com'
+        }); 
+        logToConsole('TRACK call sent: "PII Drop Test Event".', 'success');
+        logToConsole('Verify the email property and any persisted traits were removed.', 'error');
+        alert('✓ Step 4 completed: Track event sent. Check the Console Log for removal verification.');
+    } else {
+        logToConsole('ERROR: Analytics not loaded', 'error');
+    }
+}
+
+function runStep5() {
+    // Step 5: Reset consent to true
+    logToConsole('[Step 5] Triggering consent approval (resetting middleware)...', 'info');
+    if (typeof analytics !== 'undefined') {
+        analytics.track("Consent Preferences Updated", {
+            consentApproval: true
+        });
+        logToConsole('TRACK call sent: "Consent Preferences Updated", consentApproval: true', 'gclid');
+        alert('✓ Step 5 completed: Consent set to true. PII dropping middleware is now inactive.');
+    } else {
+        logToConsole('ERROR: Analytics not loaded', 'error');
+    }
+    updateStatus();
+}
+
+function runStep6() {
+    // Step 6: Test PII persistence after consent is approved again
+    logToConsole('[Step 6] Testing PII inclusion with Identify call (Consent Approved)...', 'info');
+    if (typeof analytics !== 'undefined') {
+        // This identify call will now include traits saved in localStorage from Step 1
+        analytics.identify(); 
+        logToConsole('IDENTIFY call sent (empty parameters).', 'success');
+        logToConsole('Check the event payload above. firstName, lastName, and email (from Step 1) SHOULD NOW be present.', 'success');
+        alert('✓ Step 6 completed: Identify called. PII fields (firstName, lastName, email) should be INCLUDED in the outgoing event payload.');
+    } else {
+        logToConsole('ERROR: Analytics not loaded', 'error');
+    }
+    updateStatus();
+}
+
+// ===============================
+// INITIALIZATION LOGIC (Part H)
+// ===============================
+
+document.addEventListener('DOMContentLoaded', function() {
+    const consoleLog = document.getElementById('consoleLog');
+    if (consoleLog) {
+        consoleLog.innerHTML = ''; 
+        logToConsole('🚀 Page loaded, initializing...', 'info');
+        logToConsole('⏳ Waiting for Analytics.js and middleware registration...', 'info');
+    }
+});
+
+analytics.ready(function() {
+    logToConsole('✅ Analytics.js loaded and ready', 'success');
+    updateStatus();
+});
+
+setInterval(updateStatus, 2000); // Update status every 2 seconds
+
+</script>
+
+<style>
+/* CSS STYLING GUIDELINES (Based on GCLID : template ff.) */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; background: linear-gradient(135deg, #764ba2 0%, #667eea 100%); padding: 20px; min-height: 100vh; }
+.container { max-width: 1700px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2); overflow: hidden; }
+.content { display: grid; grid-template-columns: 1fr 500px; gap: 0; min-height: calc(100vh - 200px); }
+.left-column { padding: 30px; overflow-y: auto; max-height: calc(100vh - 200px); border-right: 2px solid #e0e0e0; }
+.right-column { padding: 15px; background: #f8f9fa; overflow-y: auto; max-height: calc(100vh - 200px); position: sticky; top: 0; }
+header { background: linear-gradient(135deg, #764ba2 0%, #667eea 100%); color: white; padding: 30px; text-align: center; }
+h1 { font-size: 2.5em; margin-bottom: 10px; }
+.subtitle { font-size: 1.1em; opacity: 0.9; }
+.info-box { background: #ffe7e7; border-left: 4px solid #dc3545; padding: 20px; margin-bottom: 30px; border-radius: 4px; }
+.info-box h2 { color: #dc3545; margin-bottom: 10px; font-size: 1.3em; }
+.info-box p { line-height: 1.6; color: #555; }
+.status-panel { background: white; border: 2px solid #dee2e6; border-radius: 8px; padding: 2%; margin-bottom: 10px; max-height: 30%; }
+.status-panel h3 { margin-bottom: 10px; color: #333; font-size: 1em; }
+.status-item { display: flex; justify-content: space-between; padding: 10px; background: white; margin-bottom: 10px; border-radius: 4px; border: 1px solid #e0e0e0; }
+.status-label { font-size: .8em; font-weight: 600; color: #555; }
+.status-value { font-size: .7em; font-family: 'Courier New', monospace; color: #764ba2; word-break: break-all; }
+.test-steps { margin-top: 30px; }
+.step { background: white; border: 2px solid #e0e0e0; border-radius: 8px; padding: 20px; margin-bottom: 20px; transition: all 0.3s; }
+.step:hover { border-color: #764ba2; box-shadow: 0 4px 12px rgba(118, 75, 162, 0.15); }
+.step-header { display: flex; align-items: center; margin-bottom: 15px; }
+.step-number { background: linear-gradient(135deg, #764ba2 0%, #667eea 100%); color: white; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 1.2em; margin-right: 15px; }
+.step-title { font-size: 1.3em; color: #333; font-weight: 600; }
+.step-description { color: #666; line-height: 1.6; margin-bottom: 15px; }
+.code-block { background: #2d2d2d; color: #f8f8f2; padding: 15px; border-radius: 6px; overflow-x: auto; margin-bottom: 15px; font-family: 'Courier New', monospace; font-size: 0.9em; }
+.code-block pre { margin: 0; }
+.step-note { background: #e7f3ff; border-left: 4px solid #2196F3; padding: 12px; margin-top: 15px; border-radius: 4px; font-size: 0.95em; color: #666; }
+.btn { background: linear-gradient(135deg, #764ba2 0%, #667eea 100%); color: white; border: none; padding: 12px 24px; border-radius: 6px; font-size: 1em; font-weight: 600; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 8px rgba(118, 75, 162, 0.3); }
+.btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(118, 75, 162, 0.4); }
+.btn:active { transform: translateY(0); }
+.btn-secondary { background: #6c757d; box-shadow: 0 2px 8px rgba(108, 117, 125, 0.3); }
+.success { color: #28a745; font-weight: bold; }
+.error { color: #dc3545; font-weight: bold; }
+.console-panel { background: white; border: 2px solid #dee2e6; border-radius: 8px; padding: 2%; height: 73%; }
+.console-panel h3 { margin-bottom: 5px; color: #333; font-size: 1em; }
+.console-log { background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 4px; height: 95%; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 0.85em; line-height: 1.5; }
+.log-entry { margin-bottom: 5px; padding: 5px; border-radius: 3px; white-space: pre-wrap; word-break: break-word; }
+.log-gclid { color: #4ec9b0; font-weight: bold; }
+.log-info { color: #9cdcfe; }
+.log-success { color: #4ec9b0; }
+.log-error { color: #f48771; font-weight: bold; }
+.log-json { color: #ce9178; font-family: 'Courier New', monospace; font-size: 0.9em; white-space: pre-wrap; line-height: 1.6; }
+footer { background: #f8f9fa; padding: 5px; text-align: center; color: #666; font-size: 0.75em; }
+</style>
+
+</head>
+<body>
+
+<div class="container">
+<header>
+    <h1>🔒 Consent Drop PII Middleware</h1>
+    <p class="subtitle">Automatically removes PII fields (firstName, lastName, email) when consent is denied.</p>
+</header>
+
+<div class="content">
+
+    <!-- LEFT COLUMN: Test Steps -->
+    <div class="left-column">
+        <div class="info-box">
+            <h2>What is this middleware?</h2>
+            <p>
+                This **Source Middleware** intercepts all events before they are sent to destinations. It monitors for the "Consent Preferences Updated" event to set a global flag (`consentApproved`) [2]. If `consentApproved` is `false`, it sanitizes specific PII fields (firstName, lastName, email) from event properties [4], traits [4, 5], and context traits [5].
+            </p>
+            <p style="margin-top: 10px;">
+                <strong>Key Mechanism:</strong> The middleware drops PII from the *event payload* but purposefully leaves PII in the client's `localStorage` Segment cookie (`ajs_user_traits`), ready for when consent is re-approved [7].
+            </p>
+        </div>
+
+        <div class="test-steps">
+            <h2>🧪 Testing Steps</h2>
+
+            <!-- Step 1: Initialize User with PII -->
+            <div class="step">
+                <div class="step-header">
+                    <div class="step-number">1</div>
+                    <div class="step-title">Initialize User with PII (Consent Approved = true)</div>
+                </div>
+                <div class="step-description">
+                    Make an Identify call which adds PII fields to the `localStorage` cookie [8]. This event will pass through normally since consent is approved [2].
+                </div>
+                <div class="code-block"><pre>// Sample identify call
+analytics.identify("user_123", {
+    firstName: "Liz",
+    lastName: "Kane",
+    email: "lkane@twilio.com",
+    title: "Solutions Architect"
+});</pre></div>
+                <button class="btn" onclick="runStep1()">Run Step 1 - Identify User</button>
+                <div class="step-note">
+                    💡 Check DevTools -> Application -> Storage -> Local Storage to see `ajs_user_traits` now contains PII [7].
+                </div>
+            </div>
+
+            <!-- Step 2: Trigger Consent Denial -->
+            <div class="step">
+                <div class="step-header">
+                    <div class="step-number">2</div>
+                    <div class="step-title">Trigger Consent Preferences Denied</div>
+                </div>
+                <div class="step-description">
+                    Trigger the "Consent Preferences Updated" event with `consentApproval: false` [9]. This activates the middleware [3] to start dropping specified PII fields on all future events.
+                </div>
+                <div class="code-block"><pre>// Trigger consent denial
+analytics.track("Consent Preferences Updated", {
+    consentApproval: false
+});</pre></div>
+                <button class="btn" onclick="runStep2()">Run Step 2 - Deny Consent</button>
+                <div class="step-note">
+                    💡 This step toggles the middleware's internal `consentApproved` flag to `false` [2].
+                </div>
+            </div>
+
+            <!-- Step 3: Test PII Removal -->
+            <div class="step">
+                <div class="step-header">
+                    <div class="step-number">3</div>
+                    <div class="step-title">Test PII Removal with Identify Call</div>
+                </div>
+                <div class="step-description">
+                    Make another Identify call without parameters (`analytics.identify()`) [10]. This sends persisted traits from `localStorage`. Since consent is denied, the middleware should remove PII traits from the event payload [11, 12].
+                </div>
+                <div class="code-block"><pre>// Identify call (sends stored traits)
+analytics.identify();</pre></div>
+                <button class="btn" onclick="runStep3()">Run Step 3 - Verify PII Removal</button>
+                <div class="step-note">
+                    💡 **Verification:** The outgoing event should be missing `firstName`, `lastName`, and `email` traits [11].
+                </div>
+            </div>
+            
+            <!-- Step 4: Test PII Removal on Track Event -->
+            <div class="step">
+                <div class="step-header">
+                    <div class="step-number">4</div>
+                    <div class="step-title">Test PII Removal on Track Event</div>
+                </div>
+                <div class="step-description">
+                    Fire a standard Track event that explicitly includes an `email` property. Verify this property is sanitized by the middleware [4].
+                </div>
+                <div class="code-block"><pre>// Send track event with explicit email (should be removed)
+analytics.track('PII Drop Test Event', {
+    test_property: 'value',
+    email: 'should_be_removed@test.com'
+});</pre></div>
+                <button class="btn" onclick="runStep4()">Run Step 4 - Send Track Event</button>
+                <div class="step-note">
+                    💡 Check the event payload; the explicit `email` property should be gone.
+                </div>
+            </div>
+
+            <!-- Step 5: Trigger Consent Approval -->
+            <div class="step">
+                <div class="step-header">
+                    <div class="step-number">5</div>
+                    <div class="step-title">Trigger Consent Preferences Approved</div>
+                </div>
+                <div class="step-description">
+                    Reset the consent flag to `true` [9]. This turns off the PII dropping function, allowing future events to pass PII.
+                </div>
+                <div class="code-block"><pre>// Trigger consent approval
+analytics.track("Consent Preferences Updated", {
+    consentApproval: true
+});</pre></div>
+                <button class="btn" onclick="runStep5()">Run Step 5 - Approve Consent</button>
+                <div class="step-note">
+                    💡 The middleware's internal `consentApproved` flag should now be `true`.
+                </div>
+            </div>
+            
+            <!-- Step 6: Test PII Inclusion -->
+            <div class="step">
+                <div class="step-header">
+                    <div class="step-number">6</div>
+                    <div class="step-title">Verify PII is Included Again</div>
+                </div>
+                <div class="step-description">
+                    Make a final Identify call without parameters. Since consent is now approved, the middleware is passive, and the persisted PII traits (from Step 1) should be included in the event payload [11].
+                </div>
+                <div class="code-block"><pre>// Identify call (sends stored traits)
+analytics.identify();</pre></div>
+                <button class="btn" onclick="runStep6()">Run Step 6 - Verify PII Inclusion</button>
+                <div class="step-note">
+                    💡 **Verification:** The outgoing event payload should now include the `firstName`, `lastName`, and `email` traits.
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- RIGHT COLUMN: Results -->
+    <div class="right-column">
+        <div class="status-panel">
+            <h3>📊 Current Status</h3>
+            <div class="status-item">
+                <span class="status-label">Segment Anonymous ID:</span>
+                <span class="status-value" id="anonymousId">-</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">PII Consent Status:</span>
+                <span class="status-value" id="consentStatus">-</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Middleware Action:</span>
+                <span class="status-value" id="piiNote">-</span>
+            </div>
+        </div>
+
+        <div class="console-panel">
+            <h3>📝 Console Log (Event Payloads)</h3>
+            <div class="console-log" id="consoleLog">
+                <div class="log-entry log-info">📋 Console output will appear here...</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Implementation Guide Section -->
+<div style="max-width: 1400px; margin: 40px auto; padding: 30px; background: #f8f9fa; border-radius: 8px; border: 2px solid #dee2e6;">
+
+    <h2 style="color: #333; margin-bottom: 20px; font-size: 2em;">📋 Implementation Guide</h2>
+
+    <p style="color: #666; line-height: 1.6; margin-bottom: 20px;">
+        To implement the **Consent Drop PII Middleware** in your production environment, add the complete script containing the logic below to your website's <code>&lt;head&gt;</code> section, immediately after the Segment Analytics.js snippet [13].
+    </p>
+
+    <div style="background: #fff; border: 1px solid #dee2e6; border-radius: 6px; padding: 20px; margin-bottom: 20px;">
+        <h3 style="color: #555; margin-bottom: 15px; font-size: 1.2em;">📦 Complete Middleware Implementation Code</h3>
+        <div style="background: #2d2d2d; color: #f8f8f2; padding: 20px; border-radius: 6px; overflow-x: auto; font-family: 'Courier New', monospace; font-size: 0.9em; line-height: 1.6;">
+
+            <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">&lt;script type="text/javascript"&gt;
+
+// Global consent flag
+let consentApproved = true;
+
+// Register middleware
+const consentDropPII = function({payload, next, integrations}){
+    try {
+        const event = payload.obj;
+
+        // Step 1: Look for "Consent Preferences Updated" events
+        if (event.type === 'track' && event.event === 'Consent Preferences Updated') {
+            if (event.properties && typeof event.properties.consentApproval === 'boolean') {
+                consentApproved = event.properties.consentApproval;
+            }
+        }
+
+        // Step 2: If consent not approved, sanitize PII fields
+        if (!consentApproved) {
+            
+            // Check properties
+            if (event.properties) {
+                delete event.properties.firstName;
+                delete event.properties.lastName;
+                delete event.properties.email;
+            }
+
+            // Check traits if it's an identify event
+            if (event.type === 'identify' && event.traits) {
+                delete event.traits.firstName;
+                delete event.traits.lastName;
+                delete event.traits.email;
+            }
+
+            // Check context (sometimes traits sneak into there)
+            if (event.context && event.context.traits) {
+                delete event.context.traits.firstName;
+                delete event.context.traits.lastName;
+                delete event.context.traits.email;
+            }
+        }
+
+        // Pass modified payload to the next step
+        next(payload);
+
+    } catch (e) {
+        console.error('Middleware error:', e);
+        next(payload);
+        // fail open
+    }
+};
+
+// Register the middleware
+analytics.addSourceMiddleware(consentDropPII);
+
+&lt;/script&gt;</pre>
+        </div>
+    </div>
+
+    <div style="background: #d1ecf1; border: 1px solid #17a2b8; border-radius: 6px; padding: 20px;">
+        <h3 style="color: #0c5460; margin-bottom: 15px; font-size: 1.2em;">💡 How the Middleware Works (Summary Template Pattern)</h3>
+        <div style="color: #0c5460; line-height: 1.8;">
+
+            <p style="margin-bottom: 15px;">**1. PII Redaction** (Middleware Type: PII Redaction [14])</p>
+            <ul style="margin-left: 20px; margin-bottom: 20px;">
+                <li>The middleware is registered as a **Source Middleware** [15].</li>
+                <li>It monitors for the "Consent Preferences Updated" event to toggle its behavior [3].</li>
+                <li>When active, it uses **PII redaction** logic by explicitly deleting fields from the event payload [4, 5].
+            </ul>
+
+            <p style="margin-bottom: 15px;">**2. Persistence vs. Event Payload**</p>
+            <ul style="margin-left: 20px; margin-bottom: 20px;">
+                <li>The core principle is to allow PII data to persist locally in the Segment client's storage (`localStorage`) [7].</li>
+                <li>The middleware intercepts the event *before* it leaves the client, ensuring the sensitive data is removed from the network request [6], without compromising the ability to use that data once consent is re-approved.</li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<footer>
+    <p>Consent Drop PII Middleware Testing | Segment Analytics.js | Referenced Middleware Template Summary</p>
+</footer>
+
+</div>
+
+</body>
+</html>

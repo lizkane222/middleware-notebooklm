@@ -1,0 +1,613 @@
+<!--
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                     EDITABLE CODE BLOCKS COMPONENT                           ║
+║                                                                              ║
+║  Complete code block styling with syntax highlighting and edit              ║
+║  functionality. Includes both test step code blocks and implementation      ║
+║  guide code blocks with VS Code Dark+ theme colors.                         ║
+║                                                                              ║
+║  USAGE INSTRUCTIONS:                                                         ║
+║  1. Copy the CSS section into your <style> tag                              ║
+║  2. Copy the HTML examples where you need code blocks                       ║
+║  3. Copy the JavaScript section into your <script> tag                      ║
+║                                                                              ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+-->
+
+<!-- ============================================================================
+     CODE BLOCKS COMPONENT - AI AGENT INSTRUCTIONS
+     ============================================================================
+     
+     WHAT THIS COMPONENT DOES:
+     The Code Blocks Component provides editable, syntax-highlighted code blocks with:
+     - VS Code Dark+ theme syntax highlighting (8 color categories)
+     - Click-to-edit functionality with auto-save to localStorage
+     - Tab key inserts spaces (doesn't change focus)
+     - Visual focus states with purple border
+     - "✓ Saved" indicator on blur
+     - Supports both plain code (editable) and syntax-highlighted code
+     - Auto-loads saved edits from localStorage on page reload
+     
+     Use this component in middleware testing files where users need to see
+     executable code examples and optionally modify them for their use case.
+     
+     ─────────────────────────────────────────────────────────────────────────
+     OPTION 1: ROBUST PROMPT
+     ─────────────────────────────────────────────────────────────────────────
+     
+     Please add the Code Blocks component from testCodeBlocks.html into 
+     _____________ (file path).
+     
+     Instructions:
+     1. Copy the CSS from SECTION 1 of testCodeBlocks.html and add it to the 
+        <style> tag in _____________ (target file)
+     2. Add code block HTML using the examples from SECTION 2 in _____________
+        (e.g., "test steps", "implementation guide", "both")
+     3. Copy the JavaScript editable functionality from SECTION 3 and add it to 
+        the <script> tag in _____________ (target file)
+     4. Apply syntax highlighting to _____________ code blocks
+        (e.g., "all", "only implementation guide", "only test steps")
+     
+     Code block configuration:
+     - Editability: _____________ (default: all code blocks editable)
+       * To make specific blocks read-only, add class "read-only" to wrapper div
+     - Syntax highlighting: _____________ 
+       * "none" = plain text (editable, user-friendly)
+       * "full" = VS Code colors (professional, but edits lose highlighting)
+       * "mixed" = plain in test steps, highlighted in implementation guide (recommended)
+     - Color theme: _____________ (default: VS Code Dark+)
+     - Tab spaces: _____________ (default: 4 spaces)
+     - Auto-save: _____________ (default: enabled on blur)
+     - Storage key prefix: _____________ (default: "codeBlock_")
+     
+     Syntax highlighting colors (VS Code Dark+ theme):
+     - Comments: #6A9955 (green)
+     - Keywords: #C586C0 (purple)
+     - Functions: #DCDCAA (yellow)
+     - Variables: #9CDCFE (light blue)
+     - Strings: #CE9178 (orange)
+     - Template literals: #569CD6 (blue)
+     - Numbers: #B5CEA8 (light green)
+     - Objects/Classes: #4EC9B0 (teal)
+     
+     Best practices:
+     - Use plain code blocks for test steps (users will edit these)
+     - Use syntax-highlighted blocks for implementation guides (read-only reference)
+     - HTML syntax highlighting disappears when edited (contentEditable limitation)
+     - Limit to <50 code blocks per page for optimal performance
+     
+     ─────────────────────────────────────────────────────────────────────────
+     OPTION 2: SIMPLIFIED PROMPT
+     ─────────────────────────────────────────────────────────────────────────
+     
+     Add the Code Blocks component from testCodeBlocks.html to _____________
+     (file path).
+     
+     Apply to: _____________ (e.g., "test steps only", "implementation guide only", 
+     "both test steps and implementation guide")
+     
+     Syntax highlighting approach:
+     - Test steps: _____________ (options: "none/plain", "full highlighting")
+     - Implementation guide: _____________ (options: "none/plain", "full highlighting")
+     
+     Editability: _____________ (default: all editable, or specify "read-only for 
+     implementation guide")
+     
+     Follow the integration instructions in testCodeBlocks.html SECTION 1-3 to add:
+     1. CSS styles to <style> tag
+     2. HTML code block structure using provided examples
+     3. JavaScript editable functionality to <script> tag
+     
+     Use SECTION 5 (Syntax Highlighting Guide) for color codes and templates.
+     
+     ─────────────────────────────────────────────────────────────────────────
+     OPTION 3: ULTRA-SIMPLIFIED PROMPT
+     ─────────────────────────────────────────────────────────────────────────
+     
+     Add Code Blocks component from testCodeBlocks.html to _____________ (file path),
+     applied to _____________ (location: test steps/implementation guide/both), with
+     _____________ (syntax highlighting: none/full/mixed) and _____________ 
+     (editability: all editable/read-only guide).
+     
+     ═════════════════════════════════════════════════════════════════════════
+-->
+
+<!-- ============================================================================
+     SECTION 1: CSS STYLES
+     Copy this into your <style> tag
+     ============================================================================ -->
+
+<style>
+    /* Basic Code Block Styles */
+    .code-block {
+        background: #2d2d2d;
+        color: #f8f8f2;
+        padding: 15px;
+        border-radius: 6px;
+        overflow-x: auto;
+        margin-bottom: 15px;
+        font-family: 'Courier New', monospace;
+        font-size: 0.9em;
+        position: relative;
+        cursor: text;
+        transition: box-shadow 0.3s;
+    }
+
+    .code-block:hover {
+        box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.5);
+    }
+
+    .code-block:focus-within {
+        box-shadow: 0 0 0 2px #667eea;
+        outline: none;
+    }
+
+    .code-block pre {
+        margin: 0;
+        outline: none;
+    }
+
+    /* Saved Indicator */
+    .code-block-saved {
+        position: absolute;
+        top: 5px;
+        right: 5px;
+        background: rgba(76, 175, 80, 0.9);
+        color: white;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 0.75em;
+        opacity: 0;
+        transition: opacity 0.3s;
+    }
+
+    .code-block-saved.show {
+        opacity: 1;
+    }
+
+    /* 
+    VS CODE DARK+ SYNTAX HIGHLIGHTING COLOR PALETTE:
+    Use these colors in your <span> tags within <pre> elements
+    
+    - Comments: #6A9955 (green)
+    - Keywords (const, let, if, return, etc.): #C586C0 (purple)
+    - Functions: #DCDCAA (yellow)
+    - Variables: #9CDCFE (light blue)
+    - Strings: #CE9178 (orange)
+    - Template literals: #569CD6 (blue)
+    - Numbers: #B5CEA8 (light green)
+    - Objects/Classes: #4EC9B0 (teal)
+    */
+</style>
+
+
+<!-- ============================================================================
+     SECTION 2: HTML EXAMPLES
+     ============================================================================ -->
+
+<!-- EXAMPLE 1: Simple Test Step Code Block (without syntax highlighting) -->
+<div class="step">
+    <div class="step-header">
+        <div class="step-number">1</div>
+        <div class="step-title">Check Current Identity State</div>
+    </div>
+    <div class="step-description">
+        Check the current anonymousId and verify stored traits.
+    </div>
+    <div class="code-block"><pre>// Check current state
+console.log('Current anonymousId:', analytics.user().anonymousId());
+console.log('Current traits:', analytics.user().traits());</pre></div>
+    <button class="btn" onclick="runStep1()">Run Step 1</button>
+</div>
+
+
+<!-- EXAMPLE 2: Test Step Code Block WITH Syntax Highlighting -->
+<div class="step">
+    <div class="step-header">
+        <div class="step-number">2</div>
+        <div class="step-title">Fire Anonymous Track Event</div>
+    </div>
+    <div class="step-description">
+        Send a track event without any email or userId to test anonymous behavior.
+    </div>
+    <div class="code-block"><pre><span style="color: #6A9955;">// Fire anonymous track event</span>
+<span style="color: #9CDCFE;">analytics</span>.<span style="color: #DCDCAA;">track</span>(<span style="color: #CE9178;">'Test Anonymous Event'</span>, {
+    <span style="color: #9CDCFE;">test</span>: <span style="color: #569CD6;">true</span>,
+    <span style="color: #9CDCFE;">timestamp</span>: <span style="color: #C586C0;">new</span> <span style="color: #4EC9B0;">Date</span>().<span style="color: #DCDCAA;">toISOString</span>()
+});</pre></div>
+    <button class="btn" onclick="runStep2()">Run Step 2</button>
+    <div class="step-note">
+        💡 This event will be sent with only anonymousId (no userId).
+    </div>
+</div>
+
+
+<!-- EXAMPLE 3: Implementation Guide Code Block (Full Syntax Highlighting) -->
+<div style="background: #fff; border: 1px solid #dee2e6; border-radius: 6px; padding: 20px; margin-bottom: 20px;">
+    <h3 style="color: #555; margin-bottom: 15px; font-size: 1.2em;">📦 Complete Implementation Code</h3>
+    <div style="background: #2d2d2d; color: #f8f8f2; padding: 20px; border-radius: 6px; overflow-x: auto; font-family: 'Courier New', monospace; font-size: 0.9em; line-height: 1.6;">
+<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">
+<span style="color: #6A9955;">// ===============================</span>
+<span style="color: #6A9955;">// EXAMPLE DESTINATION MIDDLEWARE</span>
+<span style="color: #6A9955;">// ===============================</span>
+
+<span style="color: #C586C0;">const</span> <span style="color: #4FC1FF;">DESTINATION_NAME</span> = <span style="color: #CE9178;">'YourDestination'</span>; <span style="color: #6A9955;">// REPLACE with actual destination name</span>
+
+<span style="color: #C586C0;">const</span> <span style="color: #DCDCAA;">exampleMiddleware</span> = ({ <span style="color: #9CDCFE;">payload</span>, <span style="color: #9CDCFE;">next</span>, <span style="color: #9CDCFE;">integration</span> }) => {
+    <span style="color: #C586C0;">const</span> <span style="color: #9CDCFE;">event</span> = <span style="color: #9CDCFE;">payload</span>.<span style="color: #9CDCFE;">obj</span>;
+    
+    <span style="color: #6A9955;">// Helper function example</span>
+    <span style="color: #C586C0;">const</span> <span style="color: #DCDCAA;">getStoredEmail</span> = () => {
+        <span style="color: #C586C0;">try</span> {
+            <span style="color: #C586C0;">const</span> <span style="color: #9CDCFE;">storedTraitsStr</span> = <span style="color: #9CDCFE;">localStorage</span>.<span style="color: #DCDCAA;">getItem</span>(<span style="color: #CE9178;">'ajs_user_traits'</span>);
+            <span style="color: #C586C0;">if</span> (<span style="color: #9CDCFE;">storedTraitsStr</span>) {
+                <span style="color: #C586C0;">const</span> <span style="color: #9CDCFE;">storedTraits</span> = <span style="color: #4EC9B0;">JSON</span>.<span style="color: #DCDCAA;">parse</span>(<span style="color: #9CDCFE;">storedTraitsStr</span>);
+                <span style="color: #C586C0;">return</span> <span style="color: #9CDCFE;">storedTraits</span>.<span style="color: #9CDCFE;">email</span>;
+            }
+        } <span style="color: #C586C0;">catch</span> (<span style="color: #9CDCFE;">e</span>) {
+            <span style="color: #DCDCAA;">console</span>.<span style="color: #DCDCAA;">error</span>(<span style="color: #CE9178;">'Error accessing localStorage:'</span>, <span style="color: #9CDCFE;">e</span>);
+        }
+        <span style="color: #C586C0;">return</span> <span style="color: #569CD6;">null</span>;
+    };
+    
+    <span style="color: #6A9955;">// Modify the event payload</span>
+    <span style="color: #C586C0;">if</span> (<span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">type</span> === <span style="color: #CE9178;">'track'</span>) {
+        <span style="color: #DCDCAA;">console</span>.<span style="color: #DCDCAA;">log</span>(<span style="color: #CE9178;">`Processing track event: <span style="color: #569CD6;">${<span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">event</span>}</span>`</span>);
+    }
+    
+    <span style="color: #6A9955;">// Pass the modified payload to the destination</span>
+    <span style="color: #DCDCAA;">next</span>(<span style="color: #9CDCFE;">payload</span>);
+};
+
+<span style="color: #6A9955;">// Register the middleware</span>
+<span style="color: #9CDCFE;">analytics</span>.<span style="color: #DCDCAA;">addDestinationMiddleware</span>(<span style="color: #4FC1FF;">DESTINATION_NAME</span>, <span style="color: #9CDCFE;">exampleMiddleware</span>);
+</pre>
+    </div>
+</div>
+
+
+<!-- EXAMPLE 4: Multiple Code Blocks in Sequence -->
+<div class="step">
+    <div class="step-header">
+        <div class="step-number">3</div>
+        <div class="step-title">Complex Multi-Step Example</div>
+    </div>
+    <div class="step-description">
+        First, check the current state:
+    </div>
+    <div class="code-block"><pre><span style="color: #6A9955;">// Check localStorage state</span>
+<span style="color: #C586C0;">const</span> <span style="color: #9CDCFE;">storedUserId</span> = <span style="color: #9CDCFE;">localStorage</span>.<span style="color: #DCDCAA;">getItem</span>(<span style="color: #CE9178;">'ajs_user_id'</span>);
+<span style="color: #DCDCAA;">console</span>.<span style="color: #DCDCAA;">log</span>(<span style="color: #CE9178;">'Stored userId:'</span>, <span style="color: #9CDCFE;">storedUserId</span>);</pre></div>
+    
+    <div class="step-description" style="margin-top: 15px;">
+        Then, trigger the event:
+    </div>
+    <div class="code-block"><pre><span style="color: #6A9955;">// Trigger identify call</span>
+<span style="color: #9CDCFE;">analytics</span>.<span style="color: #DCDCAA;">identify</span>(<span style="color: #CE9178;">'user@example.com'</span>, {
+    <span style="color: #9CDCFE;">email</span>: <span style="color: #CE9178;">'user@example.com'</span>,
+    <span style="color: #9CDCFE;">name</span>: <span style="color: #CE9178;">'Test User'</span>
+});</pre></div>
+    
+    <button class="btn" onclick="runStep3()">Run Step 3</button>
+</div>
+
+
+<!-- ============================================================================
+     SECTION 3: JAVASCRIPT FUNCTIONALITY
+     Copy this into your <script> tag
+     ============================================================================ -->
+
+<script>
+    // ===============================
+    // EDITABLE CODE BLOCKS
+    // ===============================
+    // Makes all .code-block elements editable with auto-save to localStorage
+    
+    document.addEventListener('DOMContentLoaded', function() {
+        // Make all code blocks editable
+        const codeBlocks = document.querySelectorAll('.code-block');
+        
+        codeBlocks.forEach((block, index) => {
+            const pre = block.querySelector('pre');
+            if (pre) {
+                // Make the pre tag editable
+                pre.contentEditable = 'true';
+                pre.spellcheck = false;
+                
+                // Store original content
+                const originalContent = pre.textContent;
+                const storageKey = `codeBlock_${index}`;
+                
+                // Load saved content if exists
+                const savedContent = localStorage.getItem(storageKey);
+                if (savedContent) {
+                    pre.textContent = savedContent;
+                }
+                
+                // Add saved indicator
+                const savedIndicator = document.createElement('span');
+                savedIndicator.className = 'code-block-saved';
+                savedIndicator.textContent = '✓ Saved';
+                block.style.position = 'relative';
+                block.appendChild(savedIndicator);
+                
+                // Save on blur (clicking outside)
+                pre.addEventListener('blur', function() {
+                    const content = pre.textContent;
+                    localStorage.setItem(storageKey, content);
+                    
+                    // Show saved indicator
+                    savedIndicator.classList.add('show');
+                    setTimeout(() => {
+                        savedIndicator.classList.remove('show');
+                    }, 2000);
+                    
+                    // Log to console
+                    try {
+                        logToConsole(`[Code Editor] Code block ${index + 1} saved to localStorage`, 'success');
+                    } catch(e) {
+                        console.log(`[Code Editor] Code block ${index + 1} saved`);
+                    }
+                });
+                
+                // Prevent tab from leaving the textarea
+                pre.addEventListener('keydown', function(e) {
+                    if (e.key === 'Tab') {
+                        e.preventDefault();
+                        
+                        // Insert tab character at cursor position
+                        const selection = window.getSelection();
+                        const range = selection.getRangeAt(0);
+                        const tabNode = document.createTextNode('    '); // 4 spaces
+                        range.insertNode(tabNode);
+                        
+                        // Move cursor after tab
+                        range.setStartAfter(tabNode);
+                        range.setEndAfter(tabNode);
+                        selection.removeAllRanges();
+                        selection.addRange(range);
+                    }
+                });
+                
+                // Add visual feedback on focus
+                pre.addEventListener('focus', function() {
+                    block.style.boxShadow = '0 0 0 2px #667eea';
+                });
+                
+                pre.addEventListener('blur', function() {
+                    block.style.boxShadow = '';
+                });
+            }
+        });
+        
+        console.log(`[Code Editor] ${codeBlocks.length} code blocks are now editable. Changes auto-save to localStorage.`);
+    });
+</script>
+
+
+<!-- ============================================================================
+     SECTION 4: INTEGRATION CHECKLIST
+     ============================================================================ -->
+
+<!-- 
+□ CSS copied into <style> tag
+□ HTML code block examples reviewed
+□ JavaScript function copied into <script> tag
+□ Code blocks use .code-block class wrapper
+□ Pre tags are direct children of .code-block divs
+□ Syntax highlighting spans applied (if desired)
+□ Test editability - click into code block and type
+□ Test auto-save - edit, blur, check localStorage
+□ Test tab key - inserts 4 spaces instead of changing focus
+-->
+
+
+<!-- ============================================================================
+     SECTION 5: SYNTAX HIGHLIGHTING GUIDE
+     ============================================================================ -->
+
+<!-- 
+VS CODE DARK+ THEME COLOR PALETTE
+Use these colors in <span style="color: #XXXXXX;"> tags inside <pre>
+
+CATEGORY             | COLOR   | EXAMPLE TOKENS
+---------------------|---------|----------------------------------------------
+Comments             | #6A9955 | // comment, /* block comment */
+Keywords             | #C586C0 | const, let, var, if, else, return, try, catch
+Functions            | #DCDCAA | functionName(), methodName()
+Variables            | #9CDCFE | variableName, parameterName
+Strings              | #CE9178 | 'string', "string"
+Template Literals    | #569CD6 | `template ${variable}`
+Numbers              | #B5CEA8 | 123, 45.67, 0xff
+Objects/Classes      | #4EC9B0 | JSON, Date, Object, CustomClass
+Constants (ALL_CAPS) | #4FC1FF | API_KEY, DESTINATION_NAME
+Boolean/Null         | #569CD6 | true, false, null, undefined
+
+TEMPLATE FOR SYNTAX HIGHLIGHTING:
+
+<pre><span style="color: #6A9955;">// Comment here</span>
+<span style="color: #C586C0;">const</span> <span style="color: #9CDCFE;">variableName</span> = <span style="color: #CE9178;">'string value'</span>;
+<span style="color: #9CDCFE;">analytics</span>.<span style="color: #DCDCAA;">track</span>(<span style="color: #CE9178;">'Event Name'</span>, {
+    <span style="color: #9CDCFE;">property</span>: <span style="color: #569CD6;">true</span>
+});</pre>
+-->
+
+
+<!-- ============================================================================
+     SECTION 6: TROUBLESHOOTING
+     ============================================================================ -->
+
+<!-- 
+ISSUE: Code block not editable
+- Verify contentEditable='true' is set on <pre> tag
+- Check that JavaScript runs after DOM loads
+- Ensure .code-block class is applied to wrapper div
+
+ISSUE: Syntax highlighting disappears when editing
+- This is expected - contentEditable strips HTML formatting
+- Content is preserved as plain text in localStorage
+- On reload, you'll need to re-apply syntax highlighting manually
+- Consider keeping plain code in test steps for editability
+- Use syntax highlighting only in implementation guide (read-only)
+
+ISSUE: Tab key still changes focus
+- Check that keydown event listener is attached
+- Verify preventDefault() is being called
+- Test in different browsers (behavior may vary)
+
+ISSUE: Saved indicator doesn't show
+- Check CSS opacity transition timing
+- Verify .show class is being added/removed
+- Inspect element to see if span exists in DOM
+
+ISSUE: localStorage not persisting
+- Check browser privacy settings (incognito mode clears on close)
+- Verify localStorage is available (not blocked)
+- Check browser console for localStorage errors
+- Try different storage key naming convention
+-->
+
+
+<!-- ============================================================================
+     SECTION 7: ADVANCED CUSTOMIZATION
+     ============================================================================ -->
+
+<!-- VARIANT 1: Read-Only Code Blocks (No Editing) -->
+<!-- 
+Remove the JavaScript section entirely, or add this to your code:
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const readOnlyBlocks = document.querySelectorAll('.code-block.read-only pre');
+    readOnlyBlocks.forEach(pre => {
+        pre.contentEditable = 'false';
+        pre.style.cursor = 'default';
+    });
+});
+</script>
+
+<div class="code-block read-only">
+    <pre>// This code block cannot be edited</pre>
+</div>
+-->
+
+
+<!-- VARIANT 2: Copy-to-Clipboard Button -->
+<!-- 
+Add this CSS:
+
+<style>
+.code-block-copy {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: rgba(102, 126, 234, 0.9);
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8em;
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.code-block:hover .code-block-copy {
+    opacity: 1;
+}
+</style>
+
+Add this JavaScript:
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.code-block').forEach(block => {
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'code-block-copy';
+        copyBtn.textContent = '📋 Copy';
+        copyBtn.onclick = function() {
+            const code = block.querySelector('pre').textContent;
+            navigator.clipboard.writeText(code).then(() => {
+                copyBtn.textContent = '✓ Copied!';
+                setTimeout(() => copyBtn.textContent = '📋 Copy', 2000);
+            });
+        };
+        block.appendChild(copyBtn);
+    });
+});
+</script>
+-->
+
+
+<!-- VARIANT 3: Line Numbers -->
+<!-- 
+Add this CSS:
+
+<style>
+.code-block-with-lines {
+    display: grid;
+    grid-template-columns: auto 1fr;
+}
+
+.code-block-lines {
+    background: #1e1e1e;
+    color: #858585;
+    padding: 15px 10px;
+    text-align: right;
+    user-select: none;
+    border-right: 1px solid #3a3a3a;
+    font-family: 'Courier New', monospace;
+    font-size: 0.9em;
+    line-height: 1.6;
+}
+
+.code-block-lines div {
+    height: 1.6em;
+}
+</style>
+
+Add this HTML structure:
+
+<div class="code-block code-block-with-lines">
+    <div class="code-block-lines">
+        <div>1</div>
+        <div>2</div>
+        <div>3</div>
+    </div>
+    <pre>const x = 1;
+const y = 2;
+const z = x + y;</pre>
+</div>
+-->
+
+
+<!-- ============================================================================
+     SECTION 8: BEST PRACTICES
+     ============================================================================ -->
+
+<!-- 
+1. EDITABILITY VS SYNTAX HIGHLIGHTING
+   - Use plain code blocks for test steps (users will edit these)
+   - Use syntax-highlighted blocks for implementation guide (read-only reference)
+   - HTML syntax highlighting disappears when edited (contentEditable limitation)
+
+2. PERFORMANCE
+   - Limit to <50 code blocks per page for smooth editing
+   - Consider lazy-loading for pages with many blocks
+   - Use debouncing if adding auto-save on keyup
+
+3. ACCESSIBILITY
+   - Ensure code blocks have sufficient contrast
+   - Consider adding aria-labels for screen readers
+   - Test keyboard navigation (Tab, Enter, Arrow keys)
+
+4. MOBILE CONSIDERATIONS
+   - Code blocks may be hard to edit on mobile devices
+   - Consider disabling editability on mobile breakpoints
+   - Ensure horizontal scrolling works smoothly
+
+5. STORAGE MANAGEMENT
+   - Implement localStorage cleanup for old/unused blocks
+   - Consider adding "Reset All Code" button
+   - Store version numbers with code to handle updates
+-->

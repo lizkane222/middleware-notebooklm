@@ -1,0 +1,1415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Selective Destination Routing Middleware Testing</title>
+
+<script type="text/javascript">
+
+// ===============================
+// STEP 1: SEGMENT ANALYTICS SNIPPET (Part A)
+// Segment Analytics.js Snippet v5.2.0
+// ===============================
+!function(){var i="analytics",analytics=window[i]=window[i]||[];if(!analytics.initialize)if(analytics.invoked)window.console&&console.error&&console.error("Segment snippet included twice.");else{analytics.invoked=!0;analytics.methods=["trackSubmit","trackClick","trackLink","trackForm","pageview","identify","reset","group","track","ready","alias","debug","page","screen","once","off","on","addSourceMiddleware","addIntegrationMiddleware","setAnonymousId","addDestinationMiddleware","register"];analytics.factory=function(e){return function(){if(window[i].initialized)return window[i][e].apply(window[i],arguments);var n=Array.prototype.slice.call(arguments);if(["track","screen","alias","group","page","identify"].indexOf(e)>-1){var c=document.querySelector("link[rel='canonical']");n.push({__t:"bpc",c:c&&c.getAttribute("href")||void 0,p:location.pathname,u:location.href,s:location.search,t:document.title,r:document.referrer})}n.unshift(e);analytics.push(n);return analytics}};for(var n=0;n<analytics.methods.length;n++){var key=analytics.methods[n];analytics[key]=analytics.factory(key)}analytics.load=function(key,n){var t=document.createElement("script");t.type="text/javascript";t.async=!0;t.setAttribute("data-global-segment-analytics-key",i);t.src="https://cdn.segment.com/analytics.js/v1/" + key + "/analytics.min.js";var r=document.getElementsByTagName("script")[0];r.parentNode.insertBefore(t,r);analytics._loadOptions=n};analytics._writeKey="GHWp3Jhvn2GBHxspEdZBRVhDmJKM4XC1";;analytics.SNIPPET_VERSION="5.2.0";
+analytics.load("GHWp3Jhvn2GBHxspEdZBRVhDmJKM4XC1");
+analytics.page();
+}}();
+
+// ===============================
+// UI HELPER FUNCTIONS (Part E)
+// Based on GCLID : template [53-56]
+// ===============================
+function logToConsole(message, type = 'info') {
+    const consoleLog = document.getElementById('consoleLog');
+    if (!consoleLog) {
+        console.error('Console log element not found!');
+        return;
+    }
+    const entry = document.createElement('div');
+    entry.className = `log-entry log-${type}`;
+    const timestamp = new Date().toLocaleTimeString();
+    
+    // For JSON type, format with syntax highlighting
+    if (type === 'json') {
+        entry.innerHTML = `<span style="color: #9cdcfe;">[${timestamp}]</span> ${syntaxHighlightJSON(message)}`;
+    } else {
+        entry.textContent = `[${timestamp}] ${message}`;
+    }
+    
+    consoleLog.appendChild(entry);
+    consoleLog.scrollTop = consoleLog.scrollHeight;
+    console.log(message);
+}
+
+function syntaxHighlightJSON(json) {
+    // Parse if string, otherwise stringify
+    let obj = typeof json === 'string' ? JSON.parse(json) : json;
+    let formatted = JSON.stringify(obj, null, 2);
+    
+    // Apply syntax highlighting
+    formatted = formatted
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function (match) {
+            let cls = 'number';
+            if (/^"/.test(match)) {
+                if (/:$/.test(match)) {
+                    cls = 'key';
+                    match = match.slice(0, -1); // Remove trailing colon for styling
+                    return '<span style="color: #9cdcfe;">' + match + '</span><span style="color: #d4d4d4;">:</span>';
+                } else {
+                    cls = 'string';
+                    return '<span style="color: #ce9178;">' + match + '</span>';
+                }
+            } else if (/true|false/.test(match)) {
+                cls = 'boolean';
+                return '<span style="color: #569cd6;">' + match + '</span>';
+            } else if (/null/.test(match)) {
+                cls = 'null';
+                return '<span style="color: #569cd6;">' + match + '</span>';
+            } else {
+                return '<span style="color: #b5cea8;">' + match + '</span>';
+            }
+        });
+    
+    return '<pre style="margin: 0; line-height: 1.6; font-family: \'Courier New\', monospace;">' + formatted + '</pre>';
+}
+
+function updateStatus() {
+    const anonId = typeof analytics !== 'undefined' && analytics.user ? analytics.user().anonymousId() : 'Not Loaded';
+    document.getElementById('anonymousId').textContent = anonId;
+    document.getElementById('routerStatus').textContent = 'Active (Source Middleware)';
+}
+
+// ===============================
+// STEP EVENT CONFIGURATIONS
+// ===============================
+const stepEventConfigs = {
+    step1: {
+        eventType: 'page',
+        eventName: 'this-first-page-call-loads-ga4-config',
+        properties: { source: 'middleware_test', value: 100 },
+        integrations: {
+            'segment.io': false,
+            'Google Analytics 4 Web': true
+        }
+    },
+    step2: {
+        eventType: 'track',
+        eventName: 'track-no-integration-object-changes',
+        properties: { product_id: 'SKU-001', price: 50.00 },
+        integrations: {
+            'segment.io': false,
+            'Google Analytics 4 Web': true
+        }
+    },
+    step3: {
+        eventType: 'track',
+        eventName: 'track-test-no-segment-io-yes-GA4',
+        properties: { order_id: 'ORDER-123', total: 199.99 },
+        integrations: {
+            'segment.io': false,
+            'Google Analytics 4 Web': true
+        }
+    },
+    step4: {
+        eventType: 'track',
+        eventName: 'page_viewed',
+        properties: { title: 'Middleware Magic' },
+        integrations: {
+            'segment.io': true,
+            'Google Analytics 4 Web': false
+        }
+    },
+    step5: {
+        eventType: 'track',
+        eventName: 'Default Event',
+        properties: { test: true },
+        integrations: {
+            'segment.io': true,
+            'Google Analytics 4 Web': false
+        }
+    }
+};
+
+// Legacy reference for backward compatibility
+const stepIntegrations = {
+    get step1() { return stepEventConfigs.step1.integrations; },
+    set step1(value) { stepEventConfigs.step1.integrations = value; },
+    get step2() { return stepEventConfigs.step2.integrations; },
+    set step2(value) { stepEventConfigs.step2.integrations = value; },
+    get step3() { return stepEventConfigs.step3.integrations; },
+    set step3(value) { stepEventConfigs.step3.integrations = value; },
+    get step4() { return stepEventConfigs.step4.integrations; },
+    set step4(value) { stepEventConfigs.step4.integrations = value; },
+    get step5() { return stepEventConfigs.step5.integrations; },
+    set step5(value) { stepEventConfigs.step5.integrations = value; }
+};
+
+// Legacy reference for backward compatibility
+const eventConfigs = stepEventConfigs;
+
+// Routing rules that sync with implementation guide
+// 
+// HOW TO ADD NEW EVENT RULES:
+// 
+// 1. DEFAULT RULES (applies to all events of a type):
+//    Use pattern: '*:eventType' where eventType is 'track', 'page', 'identify', or 'group'
+//    Example:
+//      '*:page': { eventType: 'page', properties: {}, integrations: { 'segment.io': false, 'Google Analytics 4 Web': true } }
+//
+// 2. SPECIFIC EVENT RULES (applies to individual events):
+//    Use the exact event name as the key
+//    Example:
+//      'Button Clicked': { eventType: 'track', properties: { button_id: 'cta' }, integrations: { 'segment.io': true, 'Google Analytics 4 Web': false } }
+//
+// 3. PRIORITY ORDER:
+//    - Specific event name rules are checked FIRST
+//    - If no match, default rules (*:type) are checked SECOND
+//    - If no rules match, event passes through to all destinations (no filtering)
+//
+// 4. ADDING A NEW RULE:
+//    Just add a new entry with this format:
+//      'your-event-name': {
+//          eventType: 'track',  // or 'page', 'identify', 'group'
+//          properties: {},      // optional properties object
+//          integrations: {
+//              'segment.io': true,              // true = send, false = block
+//              'Google Analytics 4 Web': false
+//          }
+//      }
+//
+const routingRules = {
+    // DEFAULT RULE: All page events (unless overridden)
+    '*:page': {
+        eventType: 'page',
+        properties: {},
+        integrations: {
+            'segment.io': false,
+            'Google Analytics 4 Web': true
+        }
+    },
+    
+    // DEFAULT RULE: All track events (unless overridden)
+    '*:track': {
+        eventType: 'track',
+        properties: {},
+        integrations: {
+            'segment.io': true,
+            'Google Analytics 4 Web': true
+        }
+    },
+    
+    // SPECIFIC RULE: Override for specific event name
+    'this-first-page-call-loads-ga4-config': {
+        eventType: 'page',
+        properties: { source: 'middleware_test', value: 100 },
+        integrations: {
+            'segment.io': false,
+            'Google Analytics 4 Web': true
+        }
+    },
+    'track-no-integration-object-changes': {
+        eventType: 'track',
+        properties: { product_id: 'SKU-001', price: 50.00 },
+        integrations: {
+            'segment.io': false,
+            'Google Analytics 4 Web': true
+        }
+    },
+    'track-test-no-segment-io-yes-GA4': {
+        eventType: 'track',
+        properties: { order_id: 'ORDER-123', total: 199.99 },
+        integrations: {
+            'segment.io': false,
+            'Google Analytics 4 Web': true
+        }
+    },
+    'page_viewed': {
+        eventType: 'track',
+        properties: { title: 'Middleware Magic' },
+        integrations: {
+            'segment.io': true,
+            'Google Analytics 4 Web': false
+        }
+    }
+};
+
+// ===============================
+// MIDDLEWARE REGISTRATION
+// Must come AFTER all dependencies are defined
+// ===============================
+
+// EVENT LOGGER MIDDLEWARE
+// Logs all Segment events to the UI console
+analytics.addSourceMiddleware(function({ payload, next }) {
+    setTimeout(function() {
+        if (typeof logToConsole === 'function') {
+            const eventType = payload.obj.type;
+            const eventName = payload.obj.event || eventType;
+            logToConsole(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, 'info');
+            logToConsole(`📡 ${eventType.toUpperCase()} Event: ${eventName}`, 'success');
+            logToConsole(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, 'info');
+            const jsonPayload = JSON.stringify(payload.obj, null, 2);
+            logToConsole(jsonPayload, 'json');
+            logToConsole(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, 'info');
+        } else {
+            console.log('[EVENT LOGGER] Event captured:', payload.obj.type, payload.obj.event || '', payload.obj);
+        }
+    }, 50);
+    next(payload);
+});
+console.log('[EVENT LOGGER] Source middleware registered');
+
+// SELECTIVE ROUTING MIDDLEWARE
+// Modifies payload.obj.integrations based on routingRules
+const selectiveRouter = function({payload, next}){
+    try {
+        const event = payload.obj;
+        const eventName = event.event || event.name || event.type;
+        const eventType = event.type; // 'track', 'page', 'identify', 'group'
+
+        // Check if there's a routing rule for this specific event name
+        let rule = routingRules[eventName];
+        
+        // If no specific rule, check for event type default (e.g., '*:page' for all page events)
+        if (!rule && routingRules[`*:${eventType}`]) {
+            rule = routingRules[`*:${eventType}`];
+        }
+        
+        if (rule) {
+            const integrations = rule.integrations;
+            
+            // Ensure the integrations object exists
+            event.integrations = event.integrations || {};
+            
+            // Apply routing rules for ALL integrations in the rule
+            Object.keys(integrations).forEach(destination => {
+                event.integrations[destination] = integrations[destination];
+            });
+            
+            if (typeof logToConsole === 'function') {
+                const statusParts = Object.keys(integrations).map(dest => `${dest}=${integrations[dest]}`);
+                const ruleType = eventName === `*:${eventType}` ? 'DEFAULT' : 'SPECIFIC';
+                logToConsole(`[ROUTER] ${eventName} (${rule.eventType}) - FILTERED [${ruleType}]: ${statusParts.join(', ')}`, 'gclid');
+                logToConsole(`Updated Integrations: ${JSON.stringify(integrations)}`, 'json');
+            }
+        } else {
+            // No explicit rule found - passthrough
+            if (typeof logToConsole === 'function') {
+                logToConsole(`[ROUTER] ${eventName} (${event.type}) - PASSTHROUGH (No explicit rule)`, 'gclid');
+            }
+        }
+
+        // Pass modified payload to the next step
+        next(payload);
+
+    } catch (e) {
+        console.error('Middleware error:', e);
+        next(payload); // fail open
+    }
+};
+
+analytics.addSourceMiddleware(selectiveRouter);
+console.log('[Selective Router] Source Middleware registered.');
+
+function toggleIntegration(step, destination) {
+    const checkbox = document.getElementById(`${step}_${destination.replace(/\s+/g, '_').replace(/\./g, '_')}`);
+    stepIntegrations[step][destination] = checkbox.checked;
+    
+    // Update routingRules if this event exists in the rules
+    const eventName = eventConfigs[step].eventName;
+    if (routingRules[eventName] && routingRules[eventName].integrations[destination] !== undefined) {
+        routingRules[eventName].integrations[destination] = checkbox.checked;
+    }
+    
+    updateCodeBlock(step);
+    updateImplementationGuide();
+    updateAllStepDynamicContent();
+    logToConsole(`[${step.toUpperCase()}] ${destination}: ${checkbox.checked}`, 'info');
+}
+
+function syncCheckboxesWithRoutingRules(step) {
+    const eventName = eventConfigs[step]?.eventName;
+    if (!eventName || !routingRules[eventName]) {
+        return; // No routing rules for this event
+    }
+    
+    const rule = routingRules[eventName];
+    const integrations = rule.integrations;
+    
+    // Update stepIntegrations to match routingRules
+    Object.keys(integrations).forEach(destination => {
+        if (stepIntegrations[step][destination] !== undefined) {
+            stepIntegrations[step][destination] = integrations[destination];
+            
+            // Update the checkbox in the UI
+            const checkboxId = `${step}_${destination.replace(/\s+/g, '_').replace(/\./g, '_')}`;
+            const checkbox = document.getElementById(checkboxId);
+            if (checkbox) {
+                checkbox.checked = integrations[destination];
+            }
+        }
+    });
+}
+
+function syncAllCheckboxesWithRoutingRules() {
+    ['step1', 'step2', 'step3', 'step4', 'step5'].forEach(step => {
+        syncCheckboxesWithRoutingRules(step);
+    });
+}
+
+function addIntegration(step) {
+    const input = document.getElementById(`${step}_destination`);
+    const checkbox = document.getElementById(`${step}_enabled`);
+    const destination = input.value.trim();
+    
+    if (!destination) {
+        alert('Please enter a destination name');
+        return;
+    }
+    
+    stepIntegrations[step][destination] = checkbox.checked;
+    input.value = '';
+    
+    // Re-render checkboxes to show the new destination
+    renderDestinationCheckboxes(step);
+    
+    updateCodeBlock(step);
+    updateImplementationGuide();
+    logToConsole(`[${step.toUpperCase()}] Added integration: ${destination} = ${checkbox.checked}`, 'success');
+}
+
+function clearIntegrations(step) {
+    // Reset to default three destinations
+    stepIntegrations[step] = {
+        'segment.io': true,
+        'Google Analytics 4 Web': true
+    };
+    
+    // Re-render checkboxes to show only the default destinations
+    renderDestinationCheckboxes(step);
+    
+    updateCodeBlock(step);
+    updateImplementationGuide();
+    logToConsole(`[${step.toUpperCase()}] Reset to default integrations`, 'info');
+}
+
+function updateCodeBlock(step) {
+    const codeBlock = document.getElementById(`${step}_code`);
+    const integrations = stepIntegrations[step];
+    const hasIntegrations = Object.keys(integrations).length > 0;
+    const config = eventConfigs[step];
+    
+    let codeContent = '';
+    const integrationsStr = JSON.stringify(integrations, null, 4).replace(/\n/g, '\n    ');
+    const propertiesStr = JSON.stringify(config.properties, null, 4).replace(/\n/g, '\n    ');
+    
+    // Generate code based on event type
+    if (config.eventType === 'track') {
+        codeContent = hasIntegrations
+            ? `analytics.track('${config.eventName}', ${propertiesStr}, {\n    integrations: ${integrationsStr}\n});`
+            : `analytics.track('${config.eventName}', ${propertiesStr});`;
+    } else if (config.eventType === 'identify') {
+        // For identify: analytics.identify([userId], traits, options)
+        codeContent = hasIntegrations
+            ? `analytics.identify(${propertiesStr}, {\n    integrations: ${integrationsStr}\n});`
+            : `analytics.identify(${propertiesStr});`;
+    } else if (config.eventType === 'page') {
+        // For page: analytics.page([category], [name], properties, options)
+        codeContent = hasIntegrations
+            ? `analytics.page('${config.eventName}', ${propertiesStr}, {\n    integrations: ${integrationsStr}\n});`
+            : `analytics.page('${config.eventName}', ${propertiesStr});`;
+    } else if (config.eventType === 'group') {
+        // For group: analytics.group(groupId, traits, options)
+        codeContent = hasIntegrations
+            ? `analytics.group('${config.eventName}', ${propertiesStr}, {\n    integrations: ${integrationsStr}\n});`
+            : `analytics.group('${config.eventName}', ${propertiesStr});`;
+    }
+    
+    codeBlock.textContent = codeContent;
+}
+
+function makeCodeBlockEditable(step) {
+    const codeBlock = document.getElementById(`${step}_code`);
+    
+    codeBlock.setAttribute('contenteditable', 'true');
+    codeBlock.style.cursor = 'text';
+    
+    codeBlock.addEventListener('blur', function() {
+        saveCodeBlockChanges(step);
+    });
+    
+    codeBlock.addEventListener('keydown', function(e) {
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            document.execCommand('insertText', false, '    ');
+        }
+    });
+}
+
+function saveCodeBlockChanges(step) {
+    const codeBlock = document.getElementById(`${step}_code`);
+    const code = codeBlock.textContent;
+    
+    try {
+        // Parse event type (track, identify, page, group)
+        const eventTypeMatch = code.match(/analytics\.(track|identify|page|group)\(/);
+        if (eventTypeMatch) {
+            eventConfigs[step].eventType = eventTypeMatch[1];
+        }
+        
+        // Parse event name (for track, page, group - identify doesn't have event name)
+        if (eventConfigs[step].eventType === 'track') {
+            const eventNameMatch = code.match(/analytics\.track\(['"](.+?)['"]/);
+            if (eventNameMatch) {
+                const newEventName = eventNameMatch[1];
+                const oldEventName = eventConfigs[step].eventName;
+                
+                // Update event config
+                eventConfigs[step].eventName = newEventName;
+                
+                // Update routing rules if event name changed
+                if (oldEventName !== newEventName && routingRules[oldEventName]) {
+                    routingRules[newEventName] = routingRules[oldEventName];
+                    delete routingRules[oldEventName];
+                }
+            }
+        } else if (eventConfigs[step].eventType === 'page') {
+            const pageNameMatch = code.match(/analytics\.page\(['"](.+?)['"]/);
+            if (pageNameMatch) {
+                eventConfigs[step].eventName = pageNameMatch[1];
+            }
+        } else if (eventConfigs[step].eventType === 'group') {
+            const groupIdMatch = code.match(/analytics\.group\(['"](.+?)['"]/);
+            if (groupIdMatch) {
+                eventConfigs[step].eventName = groupIdMatch[1];
+            }
+        }
+        
+        // Parse integrations object
+        const integrationsMatch = code.match(/integrations:\s*(\{[^}]+\})/s);
+        if (integrationsMatch) {
+            const integrationsStr = integrationsMatch[1].replace(/\n/g, '').replace(/\s+/g, ' ');
+            const integrationsObj = eval('(' + integrationsStr + ')');
+            stepIntegrations[step] = integrationsObj;
+            
+            // Update checkboxes
+            Object.keys(stepIntegrations[step]).forEach(dest => {
+                const checkboxId = `${step}_${dest.replace(/\s+/g, '_').replace(/\./g, '_')}`;
+                const checkbox = document.getElementById(checkboxId);
+                if (checkbox) {
+                    checkbox.checked = stepIntegrations[step][dest];
+                }
+            });
+        }
+        
+        updateImplementationGuide();
+        updateAllStepDynamicContent();
+        logToConsole(`[${step.toUpperCase()}] Code block saved successfully (${eventConfigs[step].eventType})`, 'success');
+    } catch (e) {
+        logToConsole(`[${step.toUpperCase()}] Error parsing code block: ${e.message}`, 'error');
+        updateCodeBlock(step); // Revert to valid state
+    }
+}
+
+function updateImplementationGuide() {
+    const routingRulesCode = document.getElementById('routingRulesCode');
+    if (!routingRulesCode) return;
+    
+    let rulesStr = 'const routingRules = {\n';
+    
+    Object.keys(routingRules).forEach((eventName, index) => {
+        const rule = routingRules[eventName];
+        rulesStr += `    '${eventName}': {\n`;
+        rulesStr += `        eventType: '${rule.eventType}',\n`;
+        rulesStr += `        properties: ${JSON.stringify(rule.properties)},\n`;
+        rulesStr += `        integrations: {\n`;
+        
+        Object.keys(rule.integrations).forEach((dest, destIndex) => {
+            const comma = destIndex < Object.keys(rule.integrations).length - 1 ? ',' : '';
+            rulesStr += `            '${dest}': ${rule.integrations[dest]}${comma}\n`;
+        });
+        
+        rulesStr += `        }\n`;
+        const comma = index < Object.keys(routingRules).length - 1 ? ',' : '';
+        rulesStr += `    }${comma}\n`;
+    });
+    
+    rulesStr += '};';
+    
+    routingRulesCode.textContent = rulesStr;
+}
+
+function makeImplementationGuideEditable() {
+    const routingRulesCode = document.getElementById('routingRulesCode');
+    if (!routingRulesCode) return;
+    
+    routingRulesCode.setAttribute('contenteditable', 'true');
+    routingRulesCode.style.cursor = 'text';
+    
+    routingRulesCode.addEventListener('blur', function() {
+        saveImplementationGuideChanges();
+    });
+    
+    routingRulesCode.addEventListener('keydown', function(e) {
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            document.execCommand('insertText', false, '    ');
+        }
+    });
+}
+
+function saveImplementationGuideChanges() {
+    const routingRulesCode = document.getElementById('routingRulesCode');
+    const code = routingRulesCode.textContent;
+    
+    try {
+        // Extract the object literal
+        const match = code.match(/const routingRules = (\{[\s\S]*\});/);
+        if (match) {
+            const rulesStr = match[1];
+            const newRules = eval('(' + rulesStr + ')');
+            
+            // Update routingRules
+            Object.keys(routingRules).forEach(key => delete routingRules[key]);
+            Object.assign(routingRules, newRules);
+            
+            // Update step integrations based on new rules
+            ['step1', 'step2', 'step3', 'step4', 'step5'].forEach(step => {
+                const eventName = eventConfigs[step].eventName;
+                if (routingRules[eventName]) {
+                    const rule = routingRules[eventName];
+                    
+                    // Update eventType in eventConfigs
+                    if (rule.eventType) {
+                        eventConfigs[step].eventType = rule.eventType;
+                    }
+                    
+                    // Update properties in eventConfigs
+                    if (rule.properties) {
+                        eventConfigs[step].properties = rule.properties;
+                    }
+                    
+                    // Update integrations
+                    Object.keys(rule.integrations).forEach(dest => {
+                        if (stepIntegrations[step][dest] !== undefined) {
+                            stepIntegrations[step][dest] = rule.integrations[dest];
+                        }
+                    });
+                    
+                    // Sync checkboxes with the new routing rules
+                    syncCheckboxesWithRoutingRules(step);
+                    
+                    updateCodeBlock(step);
+                }
+            });
+            
+            updateAllStepDynamicContent();
+            logToConsole('[IMPLEMENTATION GUIDE] Routing rules updated successfully', 'success');
+        }
+    } catch (e) {
+        logToConsole(`[IMPLEMENTATION GUIDE] Error parsing routing rules: ${e.message}`, 'error');
+        updateImplementationGuide(); // Revert to valid state
+    }
+}
+
+// ===============================
+// TEST STEP FUNCTIONS (Part F)
+// Custom functions for testing the selective router
+// ===============================
+function sendLeadGenerated() {
+    logToConsole('[Step 1] Sending Lead Generated...', 'info');
+    if (typeof analytics !== 'undefined') {
+        const config = eventConfigs.step1;
+        const options = Object.keys(stepIntegrations.step1).length > 0 
+            ? { integrations: stepIntegrations.step1 }
+            : undefined;
+        
+        executeAnalyticsCall(config, options);
+        alert('✓ Step 1 completed: Check console log for routing results.');
+    } else {
+        logToConsole('ERROR: Analytics not loaded', 'error');
+    }
+}
+
+function sendProductViewed() {
+    logToConsole('[Step 2] Sending Product Viewed...', 'info');
+    if (typeof analytics !== 'undefined') {
+        const config = eventConfigs.step2;
+        const options = Object.keys(stepIntegrations.step2).length > 0 
+            ? { integrations: stepIntegrations.step2 }
+            : undefined;
+        
+        executeAnalyticsCall(config, options);
+        alert('✓ Step 2 completed: Check console log for routing results.');
+    } else {
+        logToConsole('ERROR: Analytics not loaded', 'error');
+    }
+}
+
+function sendPurchaseCompleted() {
+    logToConsole('[Step 3] Sending Purchase Completed...', 'info');
+    if (typeof analytics !== 'undefined') {
+        const config = eventConfigs.step3;
+        const options = Object.keys(stepIntegrations.step3).length > 0 
+            ? { integrations: stepIntegrations.step3 }
+            : undefined;
+        
+        executeAnalyticsCall(config, options);
+        alert('✓ Step 3 completed: Check console log for routing results.');
+    } else {
+        logToConsole('ERROR: Analytics not loaded', 'error');
+    }
+}
+
+function sendBlogPostViewed() {
+    logToConsole('[Step 4] Sending Blog Post Viewed...', 'info');
+    if (typeof analytics !== 'undefined') {
+        const config = eventConfigs.step4;
+        const options = Object.keys(stepIntegrations.step4).length > 0 
+            ? { integrations: stepIntegrations.step4 }
+            : undefined;
+        
+        executeAnalyticsCall(config, options);
+        alert('✓ Step 4 completed: Check console log for routing results.');
+    } else {
+        logToConsole('ERROR: Analytics not loaded', 'error');
+    }
+}
+
+function sendDefaultEvent() {
+    logToConsole('[Step 5] Sending Default Event...', 'info');
+    if (typeof analytics !== 'undefined') {
+        const config = eventConfigs.step5;
+        const options = Object.keys(stepIntegrations.step5).length > 0 
+            ? { integrations: stepIntegrations.step5 }
+            : undefined;
+        
+        executeAnalyticsCall(config, options);
+        alert('✓ Step 5 completed: Check console log for routing results.');
+    } else {
+        logToConsole('ERROR: Analytics not loaded', 'error');
+    }
+}
+
+function executeAnalyticsCall(config, options) {
+    switch(config.eventType) {
+        case 'track':
+            analytics.track(config.eventName, config.properties, options);
+            break;
+        case 'identify':
+            // For identify, first param can be userId (optional), second is traits
+            analytics.identify(config.properties, options);
+            break;
+        case 'page':
+            // For page, can be page([category], [name], properties, options)
+            analytics.page(config.eventName, config.properties, options);
+            break;
+        case 'group':
+            // For group: groupId, traits, options
+            analytics.group(config.eventName, config.properties, options);
+            break;
+        default:
+            logToConsole(`ERROR: Unknown event type: ${config.eventType}`, 'error');
+    }
+}
+
+// ===============================
+// DYNAMIC STEP RENDERING
+// ===============================
+function renderStepTitle(step) {
+    const config = eventConfigs[step];
+    const stepNum = step.replace('step', '');
+    const titleElement = document.querySelector(`#${step} .step-title`);
+    if (titleElement && config) {
+        const eventTypeUpper = config.eventType.toUpperCase();
+        titleElement.textContent = `Test ${eventTypeUpper}: ${config.eventName}`;
+    }
+}
+
+function renderStepDescription(step) {
+    const config = eventConfigs[step];
+    const descElement = document.querySelector(`#${step} .step-description`);
+    if (descElement && config && routingRules[config.eventName]) {
+        const rule = routingRules[config.eventName];
+        const integrations = rule.integrations;
+        
+        let descText = `Send the "${config.eventName}" event (${rule.eventType}). `;
+        descText += 'Routing: ';
+        
+        const routingParts = Object.keys(integrations).map(dest => {
+            const status = integrations[dest];
+            return `<code>${dest}: ${status}</code>`;
+        });
+        
+        descElement.innerHTML = descText + routingParts.join(', ') + '.';
+    }
+}
+
+function updateStepButton(step) {
+    const config = eventConfigs[step];
+    const stepNum = step.replace('step', '');
+    const button = document.querySelector(`#${step} .btn`);
+    if (button && config) {
+        button.textContent = `Run Step ${stepNum} - Send ${config.eventName}`;
+    }
+}
+
+function updateStepNote(step) {
+    const config = eventConfigs[step];
+    const noteElement = document.querySelector(`#${step} .step-note`);
+    if (noteElement && config && routingRules[config.eventName]) {
+        const rule = routingRules[config.eventName];
+        const integrations = rule.integrations;
+        const enabledDests = Object.keys(integrations).filter(dest => integrations[dest]);
+        const disabledDests = Object.keys(integrations).filter(dest => !integrations[dest]);
+        
+        let noteText = '💡 ';
+        if (enabledDests.length > 0 && disabledDests.length === 0) {
+            noteText += `Event will be sent to: ${enabledDests.join(', ')}.`;
+        } else if (enabledDests.length === 0 && disabledDests.length > 0) {
+            noteText += `Event will be blocked for all destinations: ${disabledDests.join(', ')}.`;
+        } else if (enabledDests.length > 0 && disabledDests.length > 0) {
+            noteText += `Sent to: ${enabledDests.join(', ')}. Blocked: ${disabledDests.join(', ')}.`;
+        } else {
+            noteText += 'Check console log for routing results.';
+        }
+        
+        noteElement.textContent = noteText;
+    }
+}
+
+function updateAllStepDynamicContent() {
+    ['step1', 'step2', 'step3', 'step4', 'step5'].forEach(step => {
+        renderStepTitle(step);
+        renderStepDescription(step);
+        updateStepButton(step);
+        updateStepNote(step);
+    });
+}
+
+// Render destination checkboxes dynamically from stepIntegrations
+function renderDestinationCheckboxes(step) {
+    const integrations = stepIntegrations[step];
+    const container = document.querySelector(`#${step} .destination-checkboxes`);
+    
+    if (!container || !integrations) return;
+    
+    container.innerHTML = '';
+    
+    Object.keys(integrations).forEach(destination => {
+        const isChecked = integrations[destination];
+        const destinationId = destination.replace(/\s+/g, '_').replace(/\./g, '_');
+        
+        const label = document.createElement('label');
+        label.style.cssText = 'display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px 12px; border-radius: 4px; background: #f8f9fa; transition: background 0.2s;';
+        label.onmouseover = function() { this.style.background = '#e9ecef'; };
+        label.onmouseout = function() { this.style.background = '#f8f9fa'; };
+        
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.id = `${step}_${destinationId}`;
+        checkbox.checked = isChecked;
+        checkbox.style.cursor = 'pointer';
+        checkbox.onchange = function() { toggleIntegration(step, destination); };
+        
+        const span = document.createElement('span');
+        span.style.cssText = "font-family: 'Courier New', monospace; font-size: 0.9em; color: #333; white-space: nowrap;";
+        span.textContent = destination;
+        
+        label.appendChild(checkbox);
+        label.appendChild(span);
+        container.appendChild(label);
+    });
+}
+
+function renderAllDestinationCheckboxes() {
+    ['step1', 'step2', 'step3', 'step4', 'step5'].forEach(step => {
+        renderDestinationCheckboxes(step);
+    });
+}
+
+// ===============================
+// INITIALIZATION LOGIC (Part H)
+// ===============================
+document.addEventListener('DOMContentLoaded', function() {
+    const consoleLog = document.getElementById('consoleLog');
+    if (consoleLog) {
+        consoleLog.innerHTML = '';
+        logToConsole('🚀 Page loaded, initializing...', 'info');
+        logToConsole('⏳ Waiting for Analytics.js and middleware registration...', 'info');
+    }
+    
+    // Sync checkboxes with routing rules first
+    syncAllCheckboxesWithRoutingRules();
+    
+    // Render destination checkboxes dynamically from stepIntegrations
+    renderAllDestinationCheckboxes();
+    
+    // Initialize all code blocks with default integrations
+    updateCodeBlock('step1');
+    updateCodeBlock('step2');
+    updateCodeBlock('step3');
+    updateCodeBlock('step4');
+    updateCodeBlock('step5');
+    
+    // Make code blocks editable
+    makeCodeBlockEditable('step1');
+    makeCodeBlockEditable('step2');
+    makeCodeBlockEditable('step3');
+    makeCodeBlockEditable('step4');
+    makeCodeBlockEditable('step5');
+    
+    // Initialize and make implementation guide editable
+    updateImplementationGuide();
+    makeImplementationGuideEditable();
+    
+    // Update all dynamic content based on eventConfigs and routingRules
+    updateAllStepDynamicContent();
+});
+
+analytics.ready(function() {
+    logToConsole('✅ Analytics.js loaded and ready', 'success');
+    updateStatus();
+});
+
+setInterval(updateStatus, 2000);
+
+    </script>
+
+    <!-- =============================== -->
+    <!-- CSS STYLING (Based on GCLID : template) [2-15, 57, 58] -->
+    <!-- =============================== -->
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; min-height: 100vh; }
+        .container { max-width: 1700px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2); overflow: hidden; }
+        .content { display: grid; grid-template-columns: 1fr 500px; gap: 0; min-height: calc(100vh - 200px); }
+        .left-column { padding: 30px; overflow-y: auto; max-height: calc(100vh - 200px); border-right: 2px solid #e0e0e0; }
+        .right-column { padding: 15px; background: #f8f9fa; overflow-y: auto; max-height: calc(100vh - 200px); position: sticky; top: 0; }
+        header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; }
+        h1 { font-size: 2.5em; margin-bottom: 10px; }
+        .subtitle { font-size: 1.1em; opacity: 0.9; }
+        .info-box { background: #e7f3ff; border-left: 4px solid #2196F3; padding: 20px; margin-bottom: 30px; border-radius: 4px; }
+        .info-box h2 { color: #1976D2; margin-bottom: 10px; font-size: 1.3em; }
+        .info-box p { line-height: 1.6; color: #555; }
+        .status-panel { background: white; border: 2px solid #dee2e6; border-radius: 8px; padding: 2%; margin-bottom: 10px; max-height: 30%; }
+        .status-panel h3 { margin-bottom: 10px; color: #333; font-size: 1em; }
+        .status-item { display: flex; justify-content: space-between; padding: 10px; background: white; margin-bottom: 10px; border-radius: 4px; border: 1px solid #e0e0e0; }
+        .status-label { font-size: .8em; font-weight: 600; color: #555; }
+        .status-value { font-size: .7em; font-family: 'Courier New', monospace; color: #667eea; word-break: break-all; }
+        .test-steps { margin-top: 30px; }
+        .step { background: white; border: 2px solid #e0e0e0; border-radius: 8px; padding: 20px; margin-bottom: 20px; transition: all 0.3s; }
+        .step:hover { border-color: #667eea; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15); }
+        .step-header { display: flex; align-items: center; margin-bottom: 15px; }
+        .step-number { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 1.2em; margin-right: 15px; }
+        .step-title { font-size: 1.3em; color: #333; font-weight: 600; }
+        .step-description { color: #666; line-height: 1.6; margin-bottom: 15px; }
+        .code-block { background: #2d2d2d; color: #f8f8f2; padding: 15px; border-radius: 6px; overflow-x: auto; margin-bottom: 15px; font-family: 'Courier New', monospace; font-size: 0.9em; border: 2px solid transparent; transition: border-color 0.3s; }
+        .code-block pre { margin: 0; }
+        .code-block:focus { outline: none; border-color: #667eea; background: #2a2a2a; }
+        .code-block[contenteditable="true"]:hover { border-color: #888; }
+        #routingRulesCode:focus { outline: none; border-color: #4ec9b0 !important; }
+        #routingRulesCode:hover { border-color: #666 !important; cursor: text; }
+        .step-note { background: #fff9e6; border-left: 4px solid #ffc107; padding: 12px; margin-top: 15px; border-radius: 4px; font-size: 0.95em; color: #666; }
+        .btn { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; padding: 12px 24px; border-radius: 6px; font-size: 1em; font-weight: 600; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3); }
+        .btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4); }
+        .btn:active { transform: translateY(0); }
+        .success { color: #28a745; font-weight: bold; }
+        .error { color: #dc3545; font-weight: bold; }
+        .console-panel { background: white; border: 2px solid #dee2e6; border-radius: 8px; padding: 2%; height: 73%; }
+        .console-panel h3 { margin-bottom: 5px; color: #333; font-size: 1em; }
+        .console-log { background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 4px; height: 95%; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 0.85em; line-height: 1.5; }
+        .log-entry { margin-bottom: 5px; padding: 5px; border-radius: 3px; white-space: pre-wrap; word-break: break-word; }
+        .log-gclid { color: #4ec9b0; font-weight: bold; } /* Using gclid color for routing actions */
+        .log-info { color: #9cdcfe; }
+        .log-success { color: #4ec9b0; }
+        .log-error { color: #f48771; font-weight: bold; }
+        .log-json { color: #ce9178; font-family: 'Courier New', monospace; font-size: 0.9em; white-space: pre-wrap; line-height: 1.6; }
+        footer { background: #f8f9fa; padding: 5px; text-align: center; color: #666; font-size: 0.75em; }
+    </style>
+
+</head>
+<body>
+
+<div class="container">
+
+    <header>
+        <h1>🚦 Selective Destination Router Middleware</h1>
+        <p class="subtitle">Dynamically sets integrations object (GA4 Cloud Actions / segment.io) based on event name and/or type.</p>
+    </header>
+
+    <div class="content">
+
+        <!-- LEFT COLUMN: Test Steps -->
+        <div class="left-column">
+
+            <div class="info-box">
+                <h2>Middleware Functionality</h2>
+                <p>
+                    This **Source Middleware** intercepts `track` events and checks the event name against a predefined `routingRules` object. It then explicitly sets the `integrations` object within the event payload [59] for **GA4 Cloud Actions** and **segment.io** (warehouse) to `true` or `false` based on those rules, thereby controlling event delivery selectively.
+                </p>
+                <p style="margin-top: 10px;">
+                    <strong>Key Mechanism:</strong> Modifying the <code>payload.obj.integrations</code> object via <code>analytics.addSourceMiddleware</code> allows fine-grained control over destination delivery per event.
+                </p>
+            </div>
+
+            <div class="test-steps">
+                <h2>🧪 Testing Steps</h2>
+
+                <!-- Step 1: GA4 ONLY -->
+                <div class="step" id="step1">
+                    <div class="step-header">
+                        <div class="step-number">1</div>
+                        <div class="step-title">Test GA4 Delivery Only (Lead Generated)</div>
+                    </div>
+                    <div class="step-description">
+                        Send the "Lead Generated" event. This should set <code>GA4 Cloud Actions: true</code> and <code>segment.io: false</code>.
+                    </div>
+                    
+                    <!-- Integrations Control -->
+                    <div style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 15px; margin-bottom: 15px;">
+                        <div style="font-weight: 600; color: #555; margin-bottom: 10px; font-size: 0.95em;">Destination Routing:</div>
+                        
+                        <!-- Default Destinations -->
+                        <div style="background: white; border: 1px solid #dee2e6; border-radius: 4px; padding: 12px; margin-bottom: 12px;">
+                            <div class="destination-checkboxes" style="display: flex; flex-wrap: wrap; gap: 12px;">
+                                <!-- Checkboxes will be dynamically generated here -->
+                            </div>
+                        </div>
+                        
+                        <!-- Add Custom Integration -->
+                        <div style="font-weight: 600; color: #555; margin-bottom: 8px; font-size: 0.9em;">Add Custom Integration:</div>
+                        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
+                            <input type="text" id="step1_destination" placeholder="Destination name" style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 0.9em;">
+                            <label style="display: flex; align-items: center; gap: 5px; white-space: nowrap; color: #555;">
+                                <input type="checkbox" id="step1_enabled" checked style="cursor: pointer;">
+                                <span style="font-size: 0.9em;">Enabled</span>
+                            </label>
+                            <button onclick="addIntegration('step1')" style="padding: 8px 16px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em; white-space: nowrap;">➕ Add</button>
+                            <button onclick="clearIntegrations('step1')" style="padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em; white-space: nowrap;">� Reset</button>
+                        </div>
+                        <div style="font-size: 0.85em; color: #666;">
+                            💡 Toggle destinations above or add custom integrations. The code block updates in real-time.
+                        </div>
+                    </div>
+                    
+                    <div class="code-block" id="step1_code">// Loading...</div>
+                    <button class="btn" onclick="sendLeadGenerated()">Run Step 1 - Send GA4 Only Event</button>
+                    <div class="step-note">
+                        💡 Verify the outgoing event payload shows GA4 enabled and Segment.io explicitly disabled.
+                    </div>
+                </div>
+
+                <!-- Step 2: Segment.io ONLY -->
+                <div class="step" id="step2">
+                    <div class="step-header">
+                        <div class="step-number">2</div>
+                        <div class="step-title">Test Segment.io Delivery Only (Product Viewed)</div>
+                    </div>
+                    <div class="step-description">
+                        Send the "Product Viewed" event. This should set <code>GA4 Cloud Actions: false</code> and <code>segment.io: true</code>.
+                    </div>
+                    
+                    <!-- Integrations Control -->
+                    <div style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 15px; margin-bottom: 15px;">
+                        <div style="font-weight: 600; color: #555; margin-bottom: 10px; font-size: 0.95em;">Destination Routing:</div>
+                        
+                        <!-- Default Destinations -->
+                        <div style="background: white; border: 1px solid #dee2e6; border-radius: 4px; padding: 12px; margin-bottom: 12px;">
+                            <div class="destination-checkboxes" style="display: flex; flex-wrap: wrap; gap: 12px;">
+                                <!-- Checkboxes will be dynamically generated here -->
+                            </div>
+                        </div>
+                        
+                        <!-- Add Custom Integration -->
+                        <div style="font-weight: 600; color: #555; margin-bottom: 8px; font-size: 0.9em;">Add Custom Integration:</div>
+                        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
+                            <input type="text" id="step2_destination" placeholder="Destination name" style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 0.9em;">
+                            <label style="display: flex; align-items: center; gap: 5px; white-space: nowrap; color: #555;">
+                                <input type="checkbox" id="step2_enabled" checked style="cursor: pointer;">
+                                <span style="font-size: 0.9em;">Enabled</span>
+                            </label>
+                            <button onclick="addIntegration('step2')" style="padding: 8px 16px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em; white-space: nowrap;">➕ Add</button>
+                            <button onclick="clearIntegrations('step2')" style="padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em; white-space: nowrap;">� Reset</button>
+                        </div>
+                        <div style="font-size: 0.85em; color: #666;">
+                            💡 Toggle destinations above or add custom integrations. The code block updates in real-time.
+                        </div>
+                    </div>
+                    
+                    <div class="code-block" id="step2_code">// Loading...</div>
+                    <button class="btn" onclick="sendProductViewed()">Run Step 2 - Send Segment.io Only Event</button>
+                    <div class="step-note">
+                        💡 The event should only be sent to the Segment warehouse destination.
+                    </div>
+                </div>
+
+                <!-- Step 3: Both Destinations -->
+                <div class="step" id="step3">
+                    <div class="step-header">
+                        <div class="step-number">3</div>
+                        <div class="step-title">Test Both Destinations (Purchase Completed)</div>
+                    </div>
+                    <div class="step-description">
+                        Send the "Purchase Completed" event. This should set <code>GA4 Cloud Actions: true</code> and <code>segment.io: true</code>.
+                    </div>
+                    
+                    <!-- Integrations Control -->
+                    <div style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 15px; margin-bottom: 15px;">
+                        <div style="font-weight: 600; color: #555; margin-bottom: 10px; font-size: 0.95em;">Destination Routing:</div>
+                        
+                        <!-- Default Destinations -->
+                        <div style="background: white; border: 1px solid #dee2e6; border-radius: 4px; padding: 12px; margin-bottom: 12px;">
+                            <div class="destination-checkboxes" style="display: flex; flex-wrap: wrap; gap: 12px;">
+                                <!-- Checkboxes will be dynamically generated here -->
+                            </div>
+                        </div>
+                        
+                        <!-- Add Custom Integration -->
+                        <div style="font-weight: 600; color: #555; margin-bottom: 8px; font-size: 0.9em;">Add Custom Integration:</div>
+                        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
+                            <input type="text" id="step3_destination" placeholder="Destination name" style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 0.9em;">
+                            <label style="display: flex; align-items: center; gap: 5px; white-space: nowrap; color: #555;">
+                                <input type="checkbox" id="step3_enabled" checked style="cursor: pointer;">
+                                <span style="font-size: 0.9em;">Enabled</span>
+                            </label>
+                            <button onclick="addIntegration('step3')" style="padding: 8px 16px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em; white-space: nowrap;">➕ Add</button>
+                            <button onclick="clearIntegrations('step3')" style="padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em; white-space: nowrap;">� Reset</button>
+                        </div>
+                        <div style="font-size: 0.85em; color: #666;">
+                            💡 Toggle destinations above or add custom integrations. The code block updates in real-time.
+                        </div>
+                    </div>
+                    
+                    <div class="code-block" id="step3_code">// Loading...</div>
+                    <button class="btn" onclick="sendPurchaseCompleted()">Run Step 3 - Send to Both</button>
+                    <div class="step-note">
+                        💡 Both destinations should be enabled in the outgoing payload's integrations object.
+                    </div>
+                </div>
+                
+                <!-- Step 4: Block Both -->
+                <div class="step" id="step4">
+                    <div class="step-header">
+                        <div class="step-number">4</div>
+                        <div class="step-title">Test Blocking Both Destinations (Blog Post Viewed)</div>
+                    </div>
+                    <div class="step-description">
+                        Send the "Blog Post Viewed" event. This should set <code>GA4 Cloud Actions: false</code> and <code>segment.io: false</code>.
+                    </div>
+                    
+                    <!-- Integrations Control -->
+                    <div style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 15px; margin-bottom: 15px;">
+                        <div style="font-weight: 600; color: #555; margin-bottom: 10px; font-size: 0.95em;">Destination Routing:</div>
+                        
+                        <!-- Default Destinations -->
+                        <div style="background: white; border: 1px solid #dee2e6; border-radius: 4px; padding: 12px; margin-bottom: 12px;">
+                            <div class="destination-checkboxes" style="display: flex; flex-wrap: wrap; gap: 12px;">
+                                <!-- Checkboxes will be dynamically generated here -->
+                            </div>
+                        </div>
+                        
+                        <!-- Add Custom Integration -->
+                        <div style="font-weight: 600; color: #555; margin-bottom: 8px; font-size: 0.9em;">Add Custom Integration:</div>
+                        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
+                            <input type="text" id="step4_destination" placeholder="Destination name" style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 0.9em;">
+                            <label style="display: flex; align-items: center; gap: 5px; white-space: nowrap; color: #555;">
+                                <input type="checkbox" id="step4_enabled" checked style="cursor: pointer;">
+                                <span style="font-size: 0.9em;">Enabled</span>
+                            </label>
+                            <button onclick="addIntegration('step4')" style="padding: 8px 16px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em; white-space: nowrap;">➕ Add</button>
+                            <button onclick="clearIntegrations('step4')" style="padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em; white-space: nowrap;">� Reset</button>
+                        </div>
+                        <div style="font-size: 0.85em; color: #666;">
+                            💡 Toggle destinations above or add custom integrations. The code block updates in real-time.
+                        </div>
+                    </div>
+                    
+                    <div class="code-block" id="step4_code">// Loading...</div>
+                    <button class="btn" onclick="sendBlogPostViewed()">Run Step 4 - Block All</button>
+                    <div class="step-note">
+                        💡 This event should be dropped entirely for the two specified destinations.
+                    </div>
+                </div>
+
+                <!-- Step 5: Default Passthrough -->
+                <div class="step" id="step5">
+                    <div class="step-header">
+                        <div class="step-number">5</div>
+                        <div class="step-title">Test Default Passthrough (Unknown Event)</div>
+                    </div>
+                    <div class="step-description">
+                        Send an event not explicitly defined in the middleware rules. It should default to passthrough, setting both destinations to <code>true</code>.
+                    </div>
+                    
+                    <!-- Integrations Control -->
+                    <div style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 15px; margin-bottom: 15px;">
+                        <div style="font-weight: 600; color: #555; margin-bottom: 10px; font-size: 0.95em;">Destination Routing:</div>
+                        
+                        <!-- Default Destinations -->
+                        <div style="background: white; border: 1px solid #dee2e6; border-radius: 4px; padding: 12px; margin-bottom: 12px;">
+                            <div class="destination-checkboxes" style="display: flex; flex-wrap: wrap; gap: 12px;">
+                                <!-- Checkboxes will be dynamically generated here -->
+                            </div>
+                        </div>
+                        
+                        <!-- Add Custom Integration -->
+                        <div style="font-weight: 600; color: #555; margin-bottom: 8px; font-size: 0.9em;">Add Custom Integration:</div>
+                        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
+                            <input type="text" id="step5_destination" placeholder="Destination name" style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 0.9em;">
+                            <label style="display: flex; align-items: center; gap: 5px; white-space: nowrap; color: #555;">
+                                <input type="checkbox" id="step5_enabled" checked style="cursor: pointer;">
+                                <span style="font-size: 0.9em;">Enabled</span>
+                            </label>
+                            <button onclick="addIntegration('step5')" style="padding: 8px 16px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em; white-space: nowrap;">➕ Add</button>
+                            <button onclick="clearIntegrations('step5')" style="padding: 8px 16px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em; white-space: nowrap;">� Reset</button>
+                        </div>
+                        <div style="font-size: 0.85em; color: #666;">
+                            💡 Toggle destinations above or add custom integrations. The code block updates in real-time.
+                        </div>
+                    </div>
+                    
+                    <div class="code-block" id="step5_code">// Loading...</div>
+                    <button class="btn" onclick="sendDefaultEvent()">Run Step 5 - Send Unknown Event</button>
+                    <div class="step-note">
+                        💡 When no rule matches, the middleware should default to sending the event to both targets.
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+
+        <!-- RIGHT COLUMN: Results -->
+        <div class="right-column">
+
+            <div class="status-panel">
+                <h3>📊 Current Status</h3>
+                <div class="status-item">
+                    <span class="status-label">Segment Anonymous ID:</span>
+                    <span class="status-value" id="anonymousId">-</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Middleware Status:</span>
+                    <span class="status-value success" id="routerStatus">-</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">GA4 Target:</span>
+                    <span class="status-value">GA4 Web Actions</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Segment Target:</span>
+                    <span class="status-value">segment.io / Segment AJS Source</span>
+                </div>
+            </div>
+
+            <div class="console-panel">
+                <h3>📝 Console Log (Event Payloads)</h3>
+                <div class="console-log" id="consoleLog">
+                    <div class="log-entry log-info">📋 Console output will appear here...</div>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+    
+    <!-- =============================== -->
+    <!-- IMPLEMENTATION GUIDE SECTION -->
+    <!-- =============================== -->
+    <div style="max-width: 1400px; margin: 40px auto; padding: 30px; background: #f8f9fa; border-radius: 8px; border: 2px solid #dee2e6;">
+
+        <h2 style="color: #333; margin-bottom: 20px; font-size: 2em;">📋 Implementation Guide</h2>
+
+        <p style="color: #666; line-height: 1.6; margin-bottom: 20px;">
+            To implement the <strong>Selective Destination Router Middleware</strong> in your production environment, add the complete script containing the logic below to your website's <code>&lt;head&gt;</code> section, immediately after the Segment Analytics.js snippet.
+        </p>
+
+        <div style="background: #fff; border: 1px solid #dee2e6; border-radius: 6px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="color: #555; margin-bottom: 15px; font-size: 1.2em;">📦 Complete Implementation Code</h3>
+            <div style="background: #2d2d2d; color: #f8f8f2; padding: 20px; border-radius: 6px; overflow-x: auto; font-family: 'Courier New', monospace; font-size: 0.9em; line-height: 1.6;">
+                <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">&lt;script type="text/javascript"&gt;
+
+// ===============================
+// SELECTIVE ROUTING MIDDLEWARE
+// ===============================
+const selectiveRouter = function({payload, next}){
+    try {
+        const event = payload.obj;
+        const eventName = event.event || event.name || event.type;
+        const eventType = event.type;
+        
+        // HOW TO ADD NEW EVENT RULES:
+        // 
+        // 1. DEFAULT RULES (applies to all events of a type):
+        //    Use pattern: '*:eventType' where eventType is 'track', 'page', 'identify', or 'group'
+        //    Example:
+        //      '*:page': { eventType: 'page', properties: {}, integrations: { 'segment.io': false, 'Google Analytics 4 Web': true } }
+        //
+        // 2. SPECIFIC EVENT RULES (applies to individual events):
+        //    Use the exact event name as the key
+        //    Example:
+        //      'Button Clicked': { eventType: 'track', properties: { button_id: 'cta' }, integrations: { 'segment.io': true, 'Google Analytics 4 Web': false } }
+        //
+        // 3. PRIORITY ORDER:
+        //    - Specific event name rules are checked FIRST
+        //    - If no match, default rules (*:type) are checked SECOND
+        //    - If no rules match, event passes through to all destinations (no filtering)
+        //
+        // 4. ADDING A NEW RULE:
+        //    Just add a new entry with this format:
+        //      'your-event-name': {
+        //          eventType: 'track',  // or 'page', 'identify', 'group'
+        //          properties: {},      // optional properties object
+        //          integrations: {
+        //              'segment.io': true,              // true = send, false = block
+        //              'Google Analytics 4 Web': false
+        //          }
+        //      }
+        //
+        </pre><pre id="routingRulesCode" style="margin: 0; white-space: pre-wrap; word-wrap: break-word; background: #3d3d3d; padding: 15px; border-radius: 4px; border: 2px solid transparent; transition: border-color 0.3s;" contenteditable="true">const routingRules = {
+    // DEFAULT RULE: All page events (unless overridden)
+    '*:page': {
+        eventType: 'page',
+        properties: {},
+        integrations: {
+            'segment.io': false,
+            'Google Analytics 4 Web': true
+        }
+    },
+    
+    // DEFAULT RULE: All track events (unless overridden)
+    '*:track': {
+        eventType: 'track',
+        properties: {},
+        integrations: {
+            'segment.io': true,
+            'Google Analytics 4 Web': true
+        }
+    },
+    
+    // SPECIFIC RULE: Override for specific event name
+    'this-first-page-call-loads-ga4-config': {
+        eventType: 'page',
+        properties: { source: 'middleware_test', value: 100 },
+        integrations: {
+            'segment.io': false,
+            'Google Analytics 4 Web': true
+        }
+    },
+    'track-no-integration-object-changes': {
+        eventType: 'track',
+        properties: { product_id: 'SKU-001', price: 50.00 },
+        integrations: {
+            'segment.io': false,
+            'Google Analytics 4 Web': true
+        }
+    },
+    'track-test-no-segment-io-yes-GA4': {
+        eventType: 'track',
+        properties: { order_id: 'ORDER-123', total: 199.99 },
+        integrations: {
+            'segment.io': false,
+            'Google Analytics 4 Web': true
+        }
+    },
+    'page_viewed': {
+        eventType: 'track',
+        properties: { title: 'Middleware Magic' },
+        integrations: {
+            'segment.io': true,
+            'Google Analytics 4 Web': false
+        }
+    }
+};</pre><pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">
+
+        // Check for routing rules (specific event or default type)
+        let rule = routingRules[eventName];
+        
+        // Fall back to default type rule if no specific rule exists
+        if (!rule && routingRules[`*:${eventType}`]) {
+            rule = routingRules[`*:${eventType}`];
+        }
+        
+        // Apply routing rules if found
+        if (rule && rule.integrations) {
+            event.integrations = event.integrations || {};
+            
+            // Iterate over all integrations in the rule
+            for (const destination in rule.integrations) {
+                event.integrations[destination] = rule.integrations[destination];
+            }
+        }
+
+        // Continue the event pipeline
+        next(payload);
+
+    } catch (e) {
+        console.error('Selective Router Middleware error:', e);
+        next(payload); // fail open
+    }
+};
+
+analytics.addSourceMiddleware(selectiveRouter);
+
+&lt;/script&gt;</pre>
+            </div>
+            <div style="margin-top: 15px; padding: 12px; background: #e7f3ff; border-left: 4px solid #2196F3; border-radius: 4px;">
+                <strong style="color: #1976D2;">💡 Editable Section:</strong>
+                <p style="color: #555; margin-top: 8px; line-height: 1.6; font-size: 0.95em;">
+                    The routing rules section (highlighted) is editable. Click inside to modify event names or boolean values. Changes will automatically sync with the test steps above when you click outside the code block.
+                </p>
+            </div>
+        </div>
+
+        <div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 6px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="color: #856404; margin-bottom: 15px; font-size: 1.2em;">⚠️ Important Implementation Notes</h3>
+            <ul style="color: #856404; line-height: 1.8; margin-left: 20px;">
+                <li><strong>Placement:</strong> This code should be placed in the <code>&lt;head&gt;</code> section, immediately after the Segment Analytics.js snippet.</li>
+                <li><strong>Middleware Type:</strong> This is a <strong>Source Middleware</strong>, meaning it runs client-side right after the event is triggered, before it is sent to Segment.</li>
+                <li><strong>Event Types Supported:</strong> This middleware works with all Segment event types: <code>track</code>, <code>page</code>, <code>identify</code>, and <code>group</code>.</li>
+                <li><strong>Destination Names:</strong> Ensure the destination keys in the <code>destinations</code> object match the exact display names of the destinations configured in your Segment workspace.</li>
+                <li><strong>Default Rules:</strong> Use the <code>*:eventType</code> pattern (e.g., <code>*:page</code>, <code>*:track</code>) to set default routing for all events of that type. Specific event rules will override defaults.</li>
+                <li><strong>Priority Order:</strong> The middleware checks rules in this order: (1) Specific event name, (2) Default type rule (<code>*:type</code>), (3) Passthrough (no filtering).</li>
+                <li><strong>Nested Structure:</strong> Each rule must have an <code>eventType</code> property and a <code>destinations</code> object with boolean values (<code>true</code> = send, <code>false</code> = block).</li>
+            </ul>
+        </div>
+
+        <div style="background: #d1ecf1; border: 1px solid #17a2b8; border-radius: 6px; padding: 20px;">
+            <h3 style="color: #0c5460; margin-bottom: 15px; font-size: 1.2em;">💡 How the Middleware Works</h3>
+            <div style="color: #0c5460; line-height: 1.8;">
+                <p style="margin-bottom: 15px;"><strong>1. Event Inspection & Rule Matching</strong></p>
+                <ul style="margin-left: 20px; margin-bottom: 20px;">
+                    <li>The middleware inspects each event's name (<code>event.event</code>, <code>event.name</code>, or <code>event.type</code>) and type (<code>event.type</code>).</li>
+                    <li>It first checks for a specific rule matching the exact event name (e.g., <code>'Lead Generated'</code>).</li>
+                    <li>If no specific rule exists, it falls back to a default type rule (e.g., <code>'*:page'</code> for all page events, <code>'*:track'</code> for all track events).</li>
+                    <li>If no rules match, the event passes through without filtering (sent to all destinations).</li>
+                </ul>
+                <p style="margin-bottom: 15px;"><strong>2. Dynamic Destination Filtering</strong></p>
+                <ul style="margin-left: 20px; margin-bottom: 20px;">
+                    <li>When a rule is found, the middleware iterates over all destinations defined in the rule's <code>destinations</code> object.</li>
+                    <li>By setting each destination's display name as a key in the <code>event.integrations</code> object with a boolean value, the middleware controls delivery.</li>
+                    <li><code>true</code> = Send the event to this destination | <code>false</code> = Block the event from this destination.</li>
+                </ul>
+                <p style="margin-bottom: 15px;"><strong>3. All Event Types Supported</strong></p>
+                <ul style="margin-left: 20px;">
+                    <li>This middleware works with <strong>all Segment event types</strong>: <code>track</code>, <code>page</code>, <code>identify</code>, and <code>group</code>.</li>
+                    <li>Use the <code>eventType</code> property in each rule to document which Segment method the event uses.</li>
+                    <li>Use default rules (<code>*:page</code>, <code>*:track</code>, etc.) to set baseline routing for entire event categories.</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <p>Selective Destination Router Middleware Testing | Segment Analytics.js | Referenced GCLID Template and Middleware Template Summary</p>
+    </footer>
+
+</div>
+
+</body>
+</html>

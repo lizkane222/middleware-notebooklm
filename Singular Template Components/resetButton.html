@@ -1,0 +1,300 @@
+<!--
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                        RESET BUTTON COMPONENT                                ║
+║                                                                              ║
+║  A complete reset button that clears all Segment state, localStorage,       ║
+║  cookies, and reloads the page for a fresh start.                           ║
+║                                                                              ║
+║  USAGE INSTRUCTIONS:                                                         ║
+║  1. Copy the CSS section into your <style> tag                              ║
+║  2. Copy the HTML section into your desired location (typically header)     ║
+║  3. Copy the JavaScript function into your <script> tag                     ║
+║                                                                              ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+-->
+
+<!-- ============================================================================
+     SECTION 1: CSS STYLES
+     Copy this into your <style> tag
+     ============================================================================ -->
+
+<style>
+    /* Page Background Styling */
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 20px;
+        min-height: 100vh;
+        margin: 0;
+    }
+
+    /* Reset Button Styles */
+    .reset-btn {
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        background: rgba(255, 255, 255, 0.2);
+        color: white;
+        border: 2px solid rgba(255, 255, 255, 0.5);
+        padding: 10px 20px;
+        border-radius: 6px;
+        font-size: 0.9em;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    .reset-btn:hover {
+        background: rgba(255, 255, 255, 0.3);
+        border-color: white;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    .reset-btn:active {
+        transform: translateY(0);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    /* 
+    CUSTOMIZATION NOTES:
+    - Position: absolute requires parent element to have position: relative
+    - Adjust top/right values to change button placement
+    - Change background/border colors to match your theme
+    - For non-header placement, remove position: absolute and use inline/block
+    */
+</style>
+
+
+<!-- ============================================================================
+     SECTION 2: HTML MARKUP
+     Copy this into your desired location
+     ============================================================================ -->
+
+<!-- 
+OPTION A: Inside a header (recommended)
+Make sure your header has position: relative in CSS
+-->
+<header>
+    <button class="reset-btn" onclick="resetEverything()">RESET CLIENT</button>
+    <!-- YOUR HEADER CONTENT HERE -->
+    <h1>Your Page Title</h1>
+    <p class="subtitle">Your subtitle</p>
+</header>
+
+<!-- 
+OPTION B: As a fixed button (floats over page)
+Add these additional styles to .reset-btn:
+    position: fixed;
+    z-index: 9999;
+-->
+
+<!-- 
+OPTION C: In a toolbar or nav section
+Remove position: absolute from CSS and use:
+-->
+<!-- 
+<div class="toolbar">
+    <button class="reset-btn" onclick="resetEverything()">🔄 Reset Everything</button>
+</div>
+-->
+
+
+<!-- ============================================================================
+     SECTION 3: JAVASCRIPT FUNCTION
+     Copy this into your <script> tag
+     ============================================================================ -->
+
+<script>
+    /**
+     * Reset Everything Function
+     * Clears all Segment state, localStorage, cookies, and reloads the page
+     * 
+     * DEPENDENCIES:
+     * - analytics object (Segment Analytics.js)
+     * - logToConsole function (optional - will fallback to console.log)
+     * 
+     * CUSTOMIZATION:
+     * - Adjust setTimeout delay (currently 500ms)
+     * - Modify confirmation message
+     * - Add/remove specific localStorage keys to preserve
+     * - Adjust cookie clearing logic for specific domains
+     */
+    function resetEverything() {
+        if (confirm('⚠️ This will clear ALL cookies, localStorage, and reset Segment. Continue?')) {
+            try {
+                logToConsole('[RESET] Clearing all data...', 'info');
+            } catch(e) {
+                console.log('[RESET] Clearing all data...');
+            }
+            
+            // Reset Segment Analytics
+            if (typeof analytics !== 'undefined' && analytics.reset) {
+                analytics.reset();
+                try {
+                    logToConsole('[RESET] Segment analytics.reset() called', 'success');
+                } catch(e) {
+                    console.log('[RESET] Segment analytics.reset() called');
+                }
+            }
+            
+            // Clear all localStorage
+            try {
+                localStorage.clear();
+                try {
+                    logToConsole('[RESET] localStorage cleared', 'success');
+                } catch(e) {
+                    console.log('[RESET] localStorage cleared');
+                }
+            } catch (e) {
+                try {
+                    logToConsole('[RESET] Error clearing localStorage: ' + e.message, 'error');
+                } catch(err) {
+                    console.log('[RESET] Error clearing localStorage: ' + e.message);
+                }
+            }
+            
+            // Clear all cookies
+            try {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i];
+                    const eqPos = cookie.indexOf('=');
+                    const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim();
+                    
+                    // Clear for current path
+                    document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
+                    
+                    // Clear for root domain
+                    document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=' + window.location.hostname;
+                    
+                    // Clear for parent domain (handles subdomains)
+                    const parts = window.location.hostname.split('.');
+                    if (parts.length > 2) {
+                        const parentDomain = '.' + parts.slice(-2).join('.');
+                        document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=' + parentDomain;
+                    }
+                }
+                try {
+                    logToConsole('[RESET] All cookies cleared', 'success');
+                } catch(e) {
+                    console.log('[RESET] All cookies cleared');
+                }
+            } catch (e) {
+                try {
+                    logToConsole('[RESET] Error clearing cookies: ' + e.message, 'error');
+                } catch(err) {
+                    console.log('[RESET] Error clearing cookies: ' + e.message);
+                }
+            }
+            
+            try {
+                logToConsole('[RESET] Complete! Reloading page NOW...', 'success');
+            } catch(e) {
+                console.log('[RESET] Complete! Reloading page NOW...');
+            }
+            
+            // Reload page with hard refresh (bypasses cache)
+            setTimeout(function() {
+                window.location.reload(true);
+            }, 500);
+        }
+    }
+</script>
+
+
+<!-- ============================================================================
+     SECTION 4: INTEGRATION CHECKLIST
+     ============================================================================ -->
+
+<!-- 
+□ CSS copied into <style> tag
+□ HTML button added to desired location
+□ Parent element has position: relative (if using absolute positioning)
+□ JavaScript function copied into <script> tag
+□ Segment Analytics.js snippet is loaded
+□ (Optional) logToConsole function exists in your file
+□ Test the button - click and verify reload happens
+-->
+
+
+<!-- ============================================================================
+     SECTION 5: TROUBLESHOOTING
+     ============================================================================ -->
+
+<!-- 
+ISSUE: Button doesn't appear
+- Check that parent element has position: relative
+- Check z-index if other elements are covering it
+- Verify CSS is in a <style> tag
+
+ISSUE: Button appears in wrong location
+- Adjust top/right values in .reset-btn CSS
+- Consider using position: fixed instead of absolute
+- Check parent element dimensions
+
+ISSUE: Page doesn't reload
+- Check browser console for JavaScript errors
+- Verify analytics object exists (may need to wait for it to load)
+- Try increasing setTimeout delay
+
+ISSUE: Cookies/localStorage not clearing
+- Some browser extensions may prevent cookie deletion
+- Test in incognito/private mode
+- Check browser's developer tools to verify clearing
+-->
+
+
+<!-- ============================================================================
+     SECTION 6: VARIANT EXAMPLES
+     ============================================================================ -->
+
+<!-- VARIANT 1: Compact Icon Button -->
+<!-- 
+<button class="reset-btn reset-btn-compact" onclick="resetEverything()" title="RESET CLIENT">
+    🔄
+</button>
+
+<style>
+.reset-btn-compact {
+    padding: 8px 12px;
+    font-size: 1.2em;
+}
+</style>
+-->
+
+<!-- VARIANT 2: Danger Style (Red) -->
+<!-- 
+<button class="reset-btn reset-btn-danger" onclick="resetEverything()">
+    🔄 Reset Everything
+</button>
+
+<style>
+.reset-btn-danger {
+    background: rgba(220, 53, 69, 0.2);
+    border-color: rgba(220, 53, 69, 0.5);
+}
+.reset-btn-danger:hover {
+    background: rgba(220, 53, 69, 0.3);
+    border-color: #dc3545;
+}
+</style>
+-->
+
+<!-- VARIANT 3: Bottom-Right Fixed Position -->
+<!-- 
+<button class="reset-btn reset-btn-fixed" onclick="resetEverything()">
+    🔄 Reset Everything
+</button>
+
+<style>
+.reset-btn-fixed {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    top: auto;
+    z-index: 9999;
+}
+</style>
+-->

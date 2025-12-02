@@ -1,0 +1,1316 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MoEngage Destination Middleware Testing</title>
+
+    <script type="text/javascript">
+        // ===============================
+        // SEGMENT ANALYTICS SNIPPET (Part A)
+        // ===============================
+        !function(){
+        var analytics=window.analytics=window.analytics||[];
+        if(!analytics.initialize)
+        if(analytics.invoked)
+        window.console&&console.error&&console.error("Segment snippet included twice.");
+        else{
+        analytics.invoked=!0;
+        analytics.methods=["trackSubmit","trackClick","trackLink","trackForm","pageview","identify","reset","group","track","ready","alias","debug","page","once","off","on","addSourceMiddleware","addIntegrationMiddleware","setAnonymousId","addDestinationMiddleware"];
+        analytics.factory=function(e){return function(){var t=Array.prototype.slice.call(arguments);t.unshift(e);analytics.push(t);return analytics}};
+
+        for(var e=0;e<analytics.methods.length;e++){
+        var key=analytics.methods[e];
+        analytics[key]=analytics.factory(key)
+        }
+        analytics.load=function(key,e){
+        var t=document.createElement("script");
+        t.type="text/javascript";
+        t.async=!0;
+        t.src="https://cdn.segment.com/analytics.js/v1/" + key + "/analytics.min.js";
+        var n=document.getElementsByTagName("script")[0];
+        n.parentNode.insertBefore(t,n);
+        analytics._loadOptions=e
+        };
+        // ********* !!!!!!!!!!!!!! *********
+        // REPLACE WITH YOUR WRITE KEY
+        analytics._writeKey="GHWp3Jhvn2GBHxspEdZBRVhDmJKM4XC1";
+        analytics.SNIPPET_VERSION="4.15.3";
+        // ********* !!!!!!!!!!!!!! *********
+        // REPLACE WITH YOUR WRITE KEY
+        // Load Analytics.js with your write key
+        analytics.load("GHWp3Jhvn2GBHxspEdZBRVhDmJKM4XC1");
+        analytics.page();
+        }
+        }();
+
+        // ===============================
+        // EVENT LOGGER MIDDLEWARE (Part B)
+        // ===============================
+        // Register middleware immediately to catch all events (including those from timeout fallbacks)
+        analytics.addSourceMiddleware(function({ payload, next }) {
+
+            // Log event to UI console
+            setTimeout(function() {
+                if (typeof logCollapsibleEvent === 'function') {
+                    const eventType = payload.obj.type;
+                    const eventName = payload.obj.event || '';
+                    
+                    // Create title based on event type
+                    let title = eventType.toUpperCase();
+                    if (eventName && eventType === 'track') {
+                        title = `Track: ${eventName}`;
+                    }
+                    title += ' → Segment (Original)';
+                    
+                    logCollapsibleEvent(title, payload.obj, 'segment');
+                } else {
+                    // Fallback to browser console if UI not ready
+                    console.log('[EVENT LOGGER] Event captured:', payload.obj.type, payload.obj.event || '', payload.obj);
+                }
+            }, 50);
+
+            // Continue event pipeline
+            next(payload);
+        });
+        console.log('[EVENT LOGGER] Middleware registered - all events will be logged to UI console');
+
+        // ===============================
+        // CUSTOM MOENGAGE DESTINATION MIDDLEWARE (Part C)
+        // ===============================
+
+        const MOENGAGE_DESTINATION_NAME = 'MoEngage'; // Use the name as configured in Segment UI
+
+        const moengageProfileUpdateMiddleware = ({ payload, next, integration }) => {
+            if (integration !== MOENGAGE_DESTINATION_NAME) {
+                // If targeting a specific destination, we would return here. 
+                // Since this is a destination middleware meant *for* MoEngage, 
+                // we assume this code is only applied to that integration via addDestinationMiddleware.
+            }
+            
+            // Create a deep copy of the original payload before modifications
+            const originalPayload = JSON.parse(JSON.stringify(payload.obj));
+            
+            const event = payload.obj;
+            let email = null;
+            
+            // Helper function to safely parse traits from localStorage
+            const getStoredEmail = () => {
+                try {
+                    const storedTraitsStr = localStorage.getItem('ajs_user_traits');
+                    if (storedTraitsStr) {
+                        const storedTraits = JSON.parse(storedTraitsStr);
+                        return storedTraits.email || storedTraits.stated_email;
+                    }
+                } catch (e) {
+                    console.error('[MoEngage Middleware] Error accessing localStorage:', e);
+                }
+                return null;
+            };
+
+            // 1. Attempt to find the best email available
+            
+            // Check traits (Identify calls, or attached traits)
+            if (event.traits) {
+                email = event.traits.email || event.traits.stated_email;
+            }
+            
+            // Check properties (Track/Page calls)
+            if (!email && event.properties) {
+                email = event.properties.email || event.properties.stated_email;
+            }
+
+            // Check localStorage fallback (Goal 1 persistence lookup)
+            if (!email) {
+                email = getStoredEmail();
+            }
+
+            // --- GOAL 1: Update userId to email if email exists ---
+            if (email) {
+                if (event.userId !== email) {
+                    event.userId = email;
+                    console.log(`[MoEngage Middleware] Goal 1: Overrode userId to email: ${email} for event type: ${event.type}`);
+                }
+                
+                // Track values for status panel
+                lastSeenEmail = email;
+                lastUserIdToMoEngage = email;
+                lastUserIdToSegment = originalPayload.userId || null;
+                lastAnonymousId = originalPayload.anonymousId;
+                
+                // Add email to appropriate fields based on event type
+                if (event.type === 'identify') {
+                    // For identify: add to traits and context.traits
+                    if (!event.traits) event.traits = {};
+                    event.traits.email = email;
+                    
+                    if (!event.context) event.context = {};
+                    if (!event.context.traits) event.context.traits = {};
+                    event.context.traits.email = email;
+                    
+                    console.log(`[MoEngage Middleware] Added email to traits and context.traits for identify event`);
+                } else if (event.type === 'track' || event.type === 'page') {
+                    // For track/page: add to properties and context.traits
+                    if (!event.properties) event.properties = {};
+                    event.properties.email = email;
+                    
+                    if (!event.context) event.context = {};
+                    if (!event.context.traits) event.context.traits = {};
+                    event.context.traits.email = email;
+                    
+                    console.log(`[MoEngage Middleware] Added email to properties and context.traits for ${event.type} event`);
+                }
+                
+                // Log the comparison to UI console
+                setTimeout(function() {
+                    if (typeof logCollapsibleEvent === 'function') {
+                        const eventType = event.type;
+                        const eventName = event.event || '';
+                        
+                        // Create title based on event type
+                        let title = eventType.toUpperCase();
+                        if (eventName && eventType === 'track') {
+                            title = `Track: ${eventName}`;
+                        }
+                        title += ' → MoEngage (Modified)';
+                        
+                        // Log summary info before collapsible
+                        logToConsole(`🔄 ${title}`, 'moengage');
+                        logToConsole(`   ✓ userId: ${event.userId} (set to email)`, 'moengage');
+                        if (event.type === 'identify') {
+                            logToConsole(`   ✓ Email in: traits.email & context.traits.email`, 'moengage');
+                        } else if (event.type === 'track' || event.type === 'page') {
+                            logToConsole(`   ✓ Email in: properties.email & context.traits.email`, 'moengage');
+                        }
+                        
+                        // Log collapsible payload
+                        logCollapsibleEvent(title, event, 'moengage');
+                        
+                        // Update status panel
+                        updateStatus(`Last event: ${event.type} - Email: ${email}`);
+                    }
+                }, 100);
+            }
+
+            // --- GOAL 2: Force Identify on specific Track events ---
+            // NOTE: We ensure an identify payload is sent to MoEngage by modifying the event type
+            // This doesn't create a new global identify call (which would affect Segment)
+            if (event.type === 'track') {
+                const eventName = event.event;
+                
+                if (eventName === 'application_quoted' || eventName === 'purchase') {
+                    if (email) {
+                        console.log(`[MoEngage Middleware] Goal 2: Critical event '${eventName}' detected.`);
+                        console.log(`[MoEngage Middleware] The track event will be sent to MoEngage with userId: ${email}`);
+                        console.log(`[MoEngage Middleware] Note: To ensure profile creation, manually call analytics.identify() in your production code after these events if needed.`);
+                        
+                        // The track event itself already has userId set to email (from Goal 1)
+                        // This is sufficient for MoEngage to create/update the profile
+                        // We don't call analytics.identify() here because that would affect ALL destinations
+                    } else {
+                        console.log(`[MoEngage Middleware] Goal 2: Event '${eventName}' has no email - profile may not be created.`);
+                    }
+                }
+            }
+            
+            // Pass the modified payload to the destination (MoEngage)
+            next(payload);
+        };
+
+        // Register the middleware
+        analytics.addDestinationMiddleware(MOENGAGE_DESTINATION_NAME, moengageProfileUpdateMiddleware);
+        console.log(`[MoEngage Middleware] Registered destination middleware for ${MOENGAGE_DESTINATION_NAME}`);
+
+
+        // ===============================
+        // UI HELPER FUNCTIONS (Part E)
+        // ===============================
+        
+        // Global tracking variables for status panel
+        let lastSeenEmail = null;
+        let lastUserIdToMoEngage = null;
+        let lastUserIdToSegment = null;
+        let lastAnonymousId = null;
+
+        function logToConsole(message, type = 'info') {
+            const consoleLog = document.getElementById('consoleLog');
+            if (!consoleLog) {
+                console.error('Console log element not found!');
+                return;
+            }
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            const timestamp = new Date().toLocaleTimeString();
+            entry.textContent = `[${timestamp}] ${message}`;
+            consoleLog.appendChild(entry);
+            
+            // Scroll the console log to show the top of the new entry (after DOM update)
+            requestAnimationFrame(() => {
+                const entryTop = entry.offsetTop;
+                consoleLog.scrollTop = entryTop;
+            });
+            
+            console.log(message);
+        }
+        
+        // Helper function to create collapsible event log
+        function logCollapsibleEvent(title, payload, destinationType) {
+            const consoleLog = document.getElementById('consoleLog');
+            if (!consoleLog) return;
+            
+            // Create container
+            const container = document.createElement('div');
+            container.className = 'event-log-container';
+            
+            // Create header
+            const header = document.createElement('div');
+            header.className = 'event-log-header';
+            
+            const titleSpan = document.createElement('span');
+            titleSpan.className = `event-log-title ${destinationType}`;
+            titleSpan.textContent = title;
+            
+            const toggle = document.createElement('span');
+            toggle.className = 'event-log-toggle';
+            toggle.textContent = 'Click to expand ▼';
+            
+            header.appendChild(titleSpan);
+            header.appendChild(toggle);
+            
+            // Create body
+            const body = document.createElement('div');
+            body.className = 'event-log-body';
+            
+            const pre = document.createElement('pre');
+            
+            // Get the base color based on destination
+            const colorMap = {
+                'segment': '#4ec9b0',
+                'moengage': '#c586c0'
+            };
+            const baseColor = colorMap[destinationType] || '#ce9178';
+            
+            // Create syntax-highlighted JSON
+            const jsonStr = JSON.stringify(payload, null, 2);
+            
+            // Apply color highlighting to specific fields and their values
+            const highlightedJson = jsonStr
+                // Highlight userId field and value
+                .replace(/"userId":\s*(".*?"|null)/g, `<span style="color: ${baseColor}; font-weight: bold;">"userId": $1</span>`)
+                // Highlight anonymousId field and value
+                .replace(/"anonymousId":\s*(".*?"|null)/g, `<span style="color: ${baseColor}; font-weight: bold;">"anonymousId": $1</span>`)
+                // Highlight event field and value (track event name)
+                .replace(/"event":\s*(".*?")/g, `<span style="color: ${baseColor}; font-weight: bold;">"event": $1</span>`)
+                // Highlight email field and value (anywhere it appears)
+                .replace(/"email":\s*(".*?")/g, `<span style="color: ${baseColor}; font-weight: bold;">"email": $1</span>`)
+                // Highlight traits object label
+                .replace(/"traits":\s*{/g, `<span style="color: ${baseColor}; font-weight: bold;">"traits":</span> {`)
+                // Highlight properties object label
+                .replace(/"properties":\s*{/g, `<span style="color: ${baseColor}; font-weight: bold;">"properties":</span> {`);
+            
+            pre.innerHTML = highlightedJson;
+            pre.style.color = '#ce9178'; // Default JSON color for non-highlighted fields
+            body.appendChild(pre);
+            
+            // Toggle functionality
+            let isExpanded = false;
+            header.addEventListener('click', function() {
+                isExpanded = !isExpanded;
+                if (isExpanded) {
+                    body.classList.add('expanded');
+                    toggle.textContent = 'Click to collapse ▲';
+                } else {
+                    body.classList.remove('expanded');
+                    toggle.textContent = 'Click to expand ▼';
+                }
+            });
+            
+            container.appendChild(header);
+            container.appendChild(body);
+            consoleLog.appendChild(container);
+            
+            // Scroll the console log to show the top of the new event container (after DOM update)
+            requestAnimationFrame(() => {
+                const containerTop = container.offsetTop;
+                consoleLog.scrollTop = containerTop;
+            });
+        }
+
+        function updateStatus(statusMessage) {
+            // Update the main status message
+            document.getElementById('statusMessage').textContent = statusMessage;
+            
+            // Update tracked fields
+            document.getElementById('emailStatus').textContent = lastSeenEmail || 'null';
+            document.getElementById('userIdMoEngage').textContent = lastUserIdToMoEngage || 'null';
+            document.getElementById('userIdSegment').textContent = lastUserIdToSegment || 'null';
+            
+            // Get current anonymousId from analytics and localStorage
+            if (typeof analytics !== 'undefined' && analytics.user) {
+                const currentAnonymousId = analytics.user().anonymousId();
+                document.getElementById('anonymousIdStatus').textContent = currentAnonymousId || 'N/A';
+                lastAnonymousId = currentAnonymousId;
+            } else {
+                document.getElementById('anonymousIdStatus').textContent = 'N/A';
+            }
+            
+            // Update localStorage cookie display
+            const ajsAnonId = localStorage.getItem('ajs_anonymous_id');
+            document.getElementById('ajsAnonymousIdCookie').textContent = ajsAnonId || 'None';
+        }
+        
+        // Helper to get current Segment user info
+        function getSegmentUserInfo() {
+            if (typeof analytics !== 'undefined' && analytics.user) {
+                const user = analytics.user();
+                return {
+                    userId: user.id(),
+                    anonymousId: user.anonymousId(),
+                    traits: user.traits()
+                };
+            }
+            return { userId: 'N/A', anonymousId: 'N/A', traits: {} };
+        }
+        
+        // Reset Everything Function
+        // Clears all Segment state, localStorage, cookies, and reloads the page
+        function resetEverything() {
+            if (confirm('⚠️ This will clear ALL cookies, localStorage, and reset Segment. Continue?')) {
+                try {
+                    logToConsole('[RESET] Clearing all data...', 'info');
+                } catch(e) {
+                    console.log('[RESET] Clearing all data...');
+                }
+                
+                // Reset Segment Analytics
+                if (typeof analytics !== 'undefined' && analytics.reset) {
+                    analytics.reset();
+                    try {
+                        logToConsole('[RESET] Segment analytics.reset() called', 'success');
+                    } catch(e) {
+                        console.log('[RESET] Segment analytics.reset() called');
+                    }
+                }
+                
+                // Clear all localStorage
+                try {
+                    localStorage.clear();
+                    try {
+                        logToConsole('[RESET] localStorage cleared', 'success');
+                    } catch(e) {
+                        console.log('[RESET] localStorage cleared');
+                    }
+                } catch (e) {
+                    try {
+                        logToConsole('[RESET] Error clearing localStorage: ' + e.message, 'error');
+                    } catch(err) {
+                        console.log('[RESET] Error clearing localStorage: ' + e.message);
+                    }
+                }
+                
+                // Clear all cookies
+                try {
+                    const cookies = document.cookie.split(';');
+                    for (let i = 0; i < cookies.length; i++) {
+                        const cookie = cookies[i];
+                        const eqPos = cookie.indexOf('=');
+                        const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim();
+                        
+                        // Clear for current path
+                        document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
+                        
+                        // Clear for root domain
+                        document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=' + window.location.hostname;
+                        
+                        // Clear for parent domain (handles subdomains)
+                        const parts = window.location.hostname.split('.');
+                        if (parts.length > 2) {
+                            const parentDomain = '.' + parts.slice(-2).join('.');
+                            document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=' + parentDomain;
+                        }
+                    }
+                    try {
+                        logToConsole('[RESET] All cookies cleared', 'success');
+                    } catch(e) {
+                        console.log('[RESET] All cookies cleared');
+                    }
+                } catch (e) {
+                    try {
+                        logToConsole('[RESET] Error clearing cookies: ' + e.message, 'error');
+                    } catch(err) {
+                        console.log('[RESET] Error clearing cookies: ' + e.message);
+                    }
+                }
+                
+                try {
+                    logToConsole('[RESET] Complete! Reloading page NOW...', 'success');
+                } catch(e) {
+                    console.log('[RESET] Complete! Reloading page NOW...');
+                }
+                
+                // Reload page with hard refresh (bypasses cache)
+                setTimeout(function() {
+                    window.location.reload(true);
+                }, 500);
+            }
+        }
+        
+        // ===============================
+        // TEST STEP FUNCTIONS (Part F)
+        // ===============================
+
+        // Step 1: Check initial state
+        function runStep1() {
+            logToConsole('[Step 1] Checking current Segment identity state...', 'info');
+            const info = getSegmentUserInfo();
+            const storedEmail = info.traits.email || localStorage.getItem('ajs_user_traits') ? JSON.parse(localStorage.getItem('ajs_user_traits')).email : 'None';
+
+            updateStatus(`Current Anonymous ID: ${info.anonymousId}. Stored Email: ${storedEmail}`);
+
+            logToConsole(`Current Anonymous ID: ${info.anonymousId}`, 'info');
+            logToConsole(`Current User ID: ${info.userId || 'None'}`, 'info');
+            logToConsole(`Stored Traits (Email Check): ${storedEmail}`, 'info');
+
+            alert(`✓ Step 1 Complete. Check the Console Log for baseline user identity.`);
+        }
+
+        // Step 2: Identify user to save email to traits/localStorage
+        function runStep2() {
+            // Extract email from the editable code block
+            const codeBlock = document.querySelectorAll('.code-block pre')[1]; // Step 2's code block
+            const codeText = codeBlock.textContent;
+            
+            // Parse email from the code block using regex
+            const emailMatch = codeText.match(/email:\s*['"]([^'"]+)['"]/);
+            const testEmail = emailMatch ? emailMatch[1] : `test_user_${Date.now()}@example.com`;
+            
+            // Parse name from the code block
+            const nameMatch = codeText.match(/name:\s*['"]([^'"]+)['"]/);
+            const testName = nameMatch ? nameMatch[1] : 'MoEngage Test User';
+            
+            // DEBUGGING: Log state BEFORE identify call
+            logToConsole('━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'info');
+            logToConsole('[Step 2 DEBUG] STATE BEFORE IDENTIFY CALL:', 'gclid');
+            logToConsole('━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'info');
+            
+            const beforeUserId = analytics.user().id();
+            const beforeAnonId = analytics.user().anonymousId();
+            const beforeTraits = analytics.user().traits();
+            const beforeLocalStorageUserId = localStorage.getItem('ajs_user_id');
+            const beforeLocalStorageTraits = localStorage.getItem('ajs_user_traits');
+            
+            logToConsole(`Current userId from analytics.user().id(): ${beforeUserId || 'null'}`, 'info');
+            logToConsole(`Current anonymousId: ${beforeAnonId}`, 'info');
+            logToConsole(`Current traits: ${JSON.stringify(beforeTraits)}`, 'info');
+            logToConsole(`localStorage['ajs_user_id']: ${beforeLocalStorageUserId || 'null'}`, 'info');
+            logToConsole(`localStorage['ajs_user_traits']: ${beforeLocalStorageTraits || 'null'}`, 'info');
+            
+            logToConsole('━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'info');
+            logToConsole(`[Step 2] Using email from code block: ${testEmail}`, 'gclid');
+            logToConsole(`[Step 2] Calling analytics.identify() with NO userId parameter`, 'gclid');
+            logToConsole('━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'info');
+
+            // Call identify WITHOUT userId - only pass traits
+            // This keeps Segment anonymous (uses anonymousId only)
+            // But MoEngage middleware will override userId to email
+            analytics.identify({
+                name: testName,
+                email: testEmail, // This saves to traits/localStorage
+                plan: 'Premium'
+            });
+
+            // DEBUGGING: Log state AFTER identify call (with short delay to let it process)
+            setTimeout(function() {
+                logToConsole('━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'info');
+                logToConsole('[Step 2 DEBUG] STATE AFTER IDENTIFY CALL:', 'gclid');
+                logToConsole('━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'info');
+                
+                const afterUserId = analytics.user().id();
+                const afterAnonId = analytics.user().anonymousId();
+                const afterTraits = analytics.user().traits();
+                const afterLocalStorageUserId = localStorage.getItem('ajs_user_id');
+                const afterLocalStorageTraits = localStorage.getItem('ajs_user_traits');
+                
+                logToConsole(`Current userId from analytics.user().id(): ${afterUserId || 'null'}`, 'info');
+                logToConsole(`Current anonymousId: ${afterAnonId}`, 'info');
+                logToConsole(`Current traits: ${JSON.stringify(afterTraits)}`, 'info');
+                logToConsole(`localStorage['ajs_user_id']: ${afterLocalStorageUserId || 'null'}`, 'info');
+                logToConsole(`localStorage['ajs_user_traits']: ${afterLocalStorageTraits || 'null'}`, 'info');
+                
+                logToConsole('━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'info');
+                
+                // Check if userId was actually set (not null and not the string "null")
+                if (afterLocalStorageUserId && afterLocalStorageUserId !== 'null') {
+                    logToConsole('⚠️ WARNING: ajs_user_id was SET in localStorage! This should be null.', 'error');
+                    logToConsole('⚠️ This means Segment will include userId in all future events.', 'error');
+                } else {
+                    logToConsole('✅ GOOD: ajs_user_id is null - Segment remains anonymous', 'success');
+                }
+                
+                logToConsole(`Identify event sent WITHOUT userId parameter.`, 'info');
+                logToConsole(`MoEngage destination middleware will intercept and SET userId to: ${testEmail}`, 'success');
+                
+                updateStatus(`Identified user. Email saved: ${testEmail}. Segment remains anonymous.`);
+            }, 200);
+            
+            alert(`✓ Step 2 Complete. Check the detailed debug logs in the console to see before/after state.`);
+        }
+        
+        // Step 3: Track a standard event (Goal 1 test - read email from localStorage)
+        function runStep3() {
+            // Extract event name and properties from code block
+            const codeBlock = document.querySelectorAll('.code-block pre')[2]; // Step 3's code block
+            const codeText = codeBlock.textContent;
+            
+            // Parse event name
+            const eventNameMatch = codeText.match(/analytics\.track\(['"]([^'"]+)['"]/);
+            const eventName = eventNameMatch ? eventNameMatch[1] : 'Product Viewed';
+            
+            // Parse product_id
+            const productIdMatch = codeText.match(/product_id:\s*['"]([^'"]+)['"]/);
+            const productId = productIdMatch ? productIdMatch[1] : 'P123';
+            
+            const originalAnonId = getSegmentUserInfo().anonymousId;
+            
+            logToConsole(`[Step 3] Sending Track event: '${eventName}' (should use stored email as userId)`, 'info');
+
+            analytics.track(eventName, {
+                product_id: productId,
+                price: 100.00
+            });
+            
+            updateStatus(`Track event sent: ${eventName}`);
+
+            logToConsole(`Track event sent. Original anonymousId: ${originalAnonId}`, 'info');
+            logToConsole(`MoEngage Destination Middleware should intercept this and set userId to the stored email.`, 'gclid');
+            
+            alert(`✓ Step 3 Complete. Check the Console Log. The outbound payload should have the previously saved email in the 'userId' field (Goal 1).`);
+        }
+
+        // Step 4: Track 'application_quoted' (Goal 1 & Goal 2 test)
+        function runStep4() {
+            // Extract event name and properties from code block
+            const codeBlock = document.querySelectorAll('.code-block pre')[3]; // Step 4's code block
+            const codeText = codeBlock.textContent;
+            
+            // Parse event name
+            const eventNameMatch = codeText.match(/analytics\.track\(['"]([^'"]+)['"]/);
+            const eventName = eventNameMatch ? eventNameMatch[1] : 'application_quoted';
+            
+            // Parse properties
+            const typeMatch = codeText.match(/type:\s*['"]([^'"]+)['"]/);
+            const insuranceType = typeMatch ? typeMatch[1] : 'car insurance';
+            
+            // Get current email from traits
+            const currentTraits = analytics.user().traits();
+            const email = currentTraits.email || 'test_user@example.com';
+            
+            logToConsole(`[Step 4] Goal 2: Sending Identify call first...`, 'gclid');
+            
+            // Step 1: Send identify call
+            analytics.identify({
+                email: email,
+                name: currentTraits.name || 'Test User'
+            });
+            
+            logToConsole(`[Step 4] Identify sent. Waiting 2 seconds before sending track event...`, 'info');
+            updateStatus(`Step 4: Identify sent, waiting 2s for track event...`);
+            
+            // Step 2: Wait 2 seconds, then send track event
+            setTimeout(function() {
+                logToConsole(`[Step 4] Now sending critical Track event: '${eventName}'`, 'gclid');
+                
+                analytics.track(eventName, {
+                    quote_id: 'Q-999',
+                    type: insuranceType
+                });
+                
+                updateStatus(`Conversion event sent: ${eventName}`);
+                logToConsole(`Track event sent. Both events should have userId set to email for MoEngage.`, 'success');
+                
+                alert(`✓ Step 4 Complete. Check the Console Log. You should see:\n1. Identify event\n2. 2-second delay\n3. Track event (${eventName})`);
+            }, 2000);
+        }
+        
+        // Step 5: Track 'purchase' (Goal 1 & Goal 2 test)
+        function runStep5() {
+            // Extract event name and properties from code block
+            const codeBlock = document.querySelectorAll('.code-block pre')[4]; // Step 5's code block
+            const codeText = codeBlock.textContent;
+            
+            // Parse event name
+            const eventNameMatch = codeText.match(/analytics\.track\(['"]([^'"]+)['"]/);
+            const eventName = eventNameMatch ? eventNameMatch[1] : 'purchase';
+            
+            // Parse order_id
+            const orderIdMatch = codeText.match(/order_id:\s*['"]([^'"]+)['"]/);
+            const orderId = orderIdMatch ? orderIdMatch[1] : 'ORD-1001';
+            
+            // Get current email from traits
+            const currentTraits = analytics.user().traits();
+            const email = currentTraits.email || 'test_user@example.com';
+            
+            logToConsole(`[Step 5] Goal 2: Sending Identify call first...`, 'gclid');
+            
+            // Step 1: Send identify call
+            analytics.identify({
+                email: email,
+                name: currentTraits.name || 'Test User'
+            });
+            
+            logToConsole(`[Step 5] Identify sent. Waiting 2 seconds before sending track event...`, 'info');
+            updateStatus(`Step 5: Identify sent, waiting 2s for track event...`);
+            
+            // Step 2: Wait 2 seconds, then send track event
+            setTimeout(function() {
+                logToConsole(`[Step 5] Now sending critical Track event: '${eventName}'`, 'gclid');
+                
+                analytics.track(eventName, {
+                    order_id: orderId,
+                    revenue: 599.99,
+                    currency: 'USD'
+                });
+                
+                updateStatus(`Conversion event sent: ${eventName}`);
+                logToConsole(`Track event sent. Both events should have userId set to email for MoEngage.`, 'success');
+                
+                alert(`✓ Step 5 Complete. Check the Console Log. You should see:\n1. Identify event\n2. 2-second delay\n3. Track event (${eventName})`);
+            }, 2000);
+        }
+
+
+        // ===============================
+        // INITIALIZATION LOGIC (Part H)
+        // ===============================
+
+        document.addEventListener('DOMContentLoaded', function() {
+            const consoleLog = document.getElementById('consoleLog');
+            if (consoleLog) {
+                consoleLog.innerHTML = '';
+                logToConsole('🚀 Page loaded, initializing...', 'info');
+                logToConsole('⏳ Waiting for Analytics.js to load...', 'info');
+            }
+        });
+
+        analytics.ready(function() {
+            logToConsole('✅ Analytics.js loaded and ready', 'success');
+            updateStatus(`Analytics Ready. MoEngage Middleware Registered.`);
+            
+            // Monitor localStorage for userId changes
+            const originalSetItem = Storage.prototype.setItem;
+            Storage.prototype.setItem = function(key, value) {
+                if (key === 'ajs_user_id') {
+                    console.error('🚨 ALERT: ajs_user_id is being SET in localStorage!');
+                    console.error('Value:', value);
+                    console.error('Stack trace:', new Error().stack);
+                    logToConsole('🚨 ALERT: ajs_user_id localStorage key was set!', 'error');
+                    logToConsole(`Value: ${value}`, 'error');
+                }
+                originalSetItem.apply(this, arguments);
+            };
+            
+            logToConsole('📊 localStorage monitor active - will alert if ajs_user_id is set', 'info');
+        });
+
+        // ===============================
+        // EDITABLE CODE BLOCKS (Part I)
+        // ===============================
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            // Make all code blocks editable
+            const codeBlocks = document.querySelectorAll('.code-block');
+            
+            codeBlocks.forEach((block, index) => {
+                const pre = block.querySelector('pre');
+                if (pre) {
+                    // Make the pre tag editable
+                    pre.contentEditable = 'true';
+                    pre.spellcheck = false;
+                    
+                    // Store original content
+                    const originalContent = pre.textContent;
+                    const storageKey = `codeBlock_${index}`;
+                    
+                    // Load saved content if exists
+                    const savedContent = localStorage.getItem(storageKey);
+                    if (savedContent) {
+                        pre.textContent = savedContent;
+                    }
+                    
+                    // Add saved indicator
+                    const savedIndicator = document.createElement('span');
+                    savedIndicator.className = 'code-block-saved';
+                    savedIndicator.textContent = '✓ Saved';
+                    block.style.position = 'relative';
+                    block.appendChild(savedIndicator);
+                    
+                    // Save on blur (clicking outside)
+                    pre.addEventListener('blur', function() {
+                        const content = pre.textContent;
+                        localStorage.setItem(storageKey, content);
+                        
+                        // Show saved indicator
+                        savedIndicator.classList.add('show');
+                        setTimeout(() => {
+                            savedIndicator.classList.remove('show');
+                        }, 2000);
+                        
+                        // Log to console
+                        try {
+                            logToConsole(`[Code Editor] Code block ${index + 1} saved to localStorage`, 'success');
+                        } catch(e) {
+                            console.log(`[Code Editor] Code block ${index + 1} saved`);
+                        }
+                    });
+                    
+                    // Prevent tab from leaving the textarea
+                    pre.addEventListener('keydown', function(e) {
+                        if (e.key === 'Tab') {
+                            e.preventDefault();
+                            
+                            // Insert tab character at cursor position
+                            const selection = window.getSelection();
+                            const range = selection.getRangeAt(0);
+                            const tabNode = document.createTextNode('    '); // 4 spaces
+                            range.insertNode(tabNode);
+                            
+                            // Move cursor after tab
+                            range.setStartAfter(tabNode);
+                            range.setEndAfter(tabNode);
+                            selection.removeAllRanges();
+                            selection.addRange(range);
+                        }
+                    });
+                    
+                    // Add visual feedback on focus
+                    pre.addEventListener('focus', function() {
+                        block.style.boxShadow = '0 0 0 2px #667eea';
+                    });
+                    
+                    pre.addEventListener('blur', function() {
+                        block.style.boxShadow = '';
+                    });
+                }
+            });
+            
+            console.log(`[Code Editor] ${codeBlocks.length} code blocks are now editable. Changes auto-save to localStorage.`);
+        });
+
+    </script>
+
+    <style>
+        /* CSS STYLING GUIDELINES */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; min-height: 100vh; }
+        .container { max-width: 1700px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2); overflow: hidden; }
+        .content { display: grid; grid-template-columns: 1fr 500px; gap: 0; min-height: calc(100vh - 200px); }
+        .left-column { padding: 30px; overflow-y: auto; max-height: calc(100vh - 200px); border-right: 2px solid #e0e0e0; }
+        .right-column { padding: 15px; background: #f8f9fa; overflow-y: auto; max-height: calc(100vh - 200px); position: sticky; top: 0; }
+        header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; position: relative; }
+        
+        /* Reset Button Styles */
+        .reset-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-size: 0.9em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+        .reset-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            border-color: white;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+        .reset-btn:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+        
+        h1 { font-size: 2.5em; margin-bottom: 10px; }
+        .subtitle { font-size: 1.1em; opacity: 0.9; }
+        .info-box { background: #e7f3ff; border-left: 4px solid #2196F3; padding: 20px; margin-bottom: 30px; border-radius: 4px; }
+        .info-box h2 { color: #1976D2; margin-bottom: 10px; font-size: 1.3em; }
+        .info-box p { line-height: 1.6; color: #555; }
+        .test-steps h2 { margin-bottom: 20px; color: #333; }
+        .status-panel { background: white; border: 2px solid #dee2e6; border-radius: 8px; padding: 2%; margin-bottom: 10px; max-height: 30%; overflow-y: auto; }
+        .status-panel h3 { margin-bottom: 10px; color: #333; font-size: 1em; }
+        .status-item { display: flex; justify-content: space-between; padding: 10px; background: white; margin-bottom: 10px; border-radius: 4px; border: 1px solid #e0e0e0; }
+        .status-label { font-size: .8em; font-weight: 600; color: #555; }
+        .status-value { font-size: .7em; font-family: 'Courier New', monospace; color: #667eea; word-break: break-all; }
+        .test-steps { margin-top: 30px; }
+        .step { background: white; border: 2px solid #e0e0e0; border-radius: 8px; padding: 20px; margin-bottom: 20px; transition: all 0.3s; }
+        .step:hover { border-color: #667eea; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15); }
+        .step-header { display: flex; align-items: center; margin-bottom: 15px; }
+        .step-number { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 1.2em; margin-right: 15px; }
+        .step-title { font-size: 1.3em; color: #333; font-weight: 600; }
+        .step-description { color: #666; line-height: 1.6; margin-bottom: 15px; }
+        .code-block { background: #2d2d2d; color: #f8f8f2; padding: 15px; border-radius: 6px; overflow-x: auto; margin-bottom: 15px; font-family: 'Courier New', monospace; font-size: 0.9em; position: relative; cursor: text; transition: box-shadow 0.3s; }
+        .code-block:hover { box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.5); }
+        .code-block:focus-within { box-shadow: 0 0 0 2px #667eea; outline: none; }
+        .code-block pre { margin: 0; outline: none; }
+        .code-block-saved { position: absolute; top: 5px; right: 5px; background: rgba(76, 175, 80, 0.9); color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.75em; opacity: 0; transition: opacity 0.3s; }
+        .code-block-saved.show { opacity: 1; }
+        .step-note { background: #fff9e6; border-left: 4px solid #ffc107; padding: 12px; margin-top: 15px; border-radius: 4px; font-size: 0.95em; color: #666; }
+        .btn { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; padding: 12px 24px; border-radius: 6px; font-size: 1em; font-weight: 600; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3); }
+        .btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4); }
+        .btn-secondary { background: #6c757d; box-shadow: 0 2px 8px rgba(108, 117, 125, 0.3); }
+        .btn-group { display: flex; gap: 10px; margin-top: 15px; }
+        .success { color: #28a745; font-weight: bold; }
+        .error { color: #dc3545; font-weight: bold; }
+        .console-panel { background: white; border: 2px solid #dee2e6; border-radius: 8px; padding: 2%; height: 73%; }
+        .console-panel h3 { margin-bottom: 5px; color: #333; font-size: 1em; }
+        .console-log { background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 4px; height: 95%; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 0.85em; line-height: 1.5; }
+        .log-entry { margin-bottom: 5px; padding: 5px; border-radius: 3px; white-space: pre-wrap; word-break: break-word; }
+        .log-gclid { color: #4ec9b0; font-weight: bold; }
+        .log-info { color: #9cdcfe; }
+        .log-success { color: #4ec9b0; }
+        .log-error { color: #f48771; font-weight: bold; }
+        .log-json { color: #ce9178; font-family: 'Courier New', monospace; font-size: 0.9em; white-space: pre-wrap; line-height: 1.6; }
+        
+        /* Destination-specific log colors */
+        .log-segment { color: #4ec9b0; font-weight: bold; }
+        .log-moengage { color: #c586c0; font-weight: bold; }
+        
+        /* Collapsible Event Logs */
+        .event-log-container { margin-bottom: 15px; border: 1px solid #3a3a3a; border-radius: 4px; overflow: hidden; }
+        .event-log-header { 
+            padding: 10px 15px; 
+            background: #2d2d2d; 
+            cursor: pointer; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center;
+            transition: background 0.2s;
+        }
+        .event-log-header:hover { background: #3a3a3a; }
+        .event-log-title { font-weight: bold; font-size: 0.95em; }
+        .event-log-title.segment { color: #4ec9b0; }
+        .event-log-title.moengage { color: #c586c0; }
+        .event-log-toggle { color: #858585; font-size: 0.9em; }
+        .event-log-body { 
+            padding: 15px; 
+            background: #1e1e1e; 
+            border-top: 1px solid #3a3a3a;
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+        .event-log-body.expanded { max-height: 2000px; }
+        .event-log-body pre { margin: 0; color: #ce9178; white-space: pre-wrap; word-break: break-word; }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <button class="reset-btn" onclick="resetEverything()">RESET CLIENT</button>
+            <h1>✉️ MoEngage Identity Middleware</h1>
+            <p class="subtitle">Standardize identity using Email and ensure critical profile creation on conversion</p>
+        </header>
+
+        <div class="content">
+            <!-- LEFT COLUMN: Test Steps -->
+            <div class="left-column">
+                <div class="info-box">
+                    <h2>What is this middleware?</h2>
+                    <p>
+                        This destination middleware is designed specifically for **MoEngage** to enforce user identification consistency [133, 134]. It overrides the event's `userId` with the user's `email` (if available) and triggers a mandatory `Identify` call upon key conversion events (`application_quoted` or `purchase`) to ensure the profile is immediately created or updated in MoEngage.
+                    </p>
+                    <p style="margin-top: 10px;">
+                        <strong>Built for:</strong> MoEngage Profile Standardization<br>
+                        <strong>Use cases:</strong> Unifying anonymous traffic with known emails and ensuring profile persistence after key conversion moments.
+                    </p>
+                </div>
+
+                <div class="test-steps">
+                    <h2>🧪 Testing Steps</h2>
+
+                    <!-- Step 1: Check Current Anonymous ID -->
+                    <div class="step">
+                        <div class="step-header">
+                            <div class="step-number">1</div>
+                            <div class="step-title">Check Current Identity State</div>
+                        </div>
+                        <div class="step-description">
+                            Check the current anonymousId and verify if any previous email traits are stored in Segment's <code>localStorage</code> (<code>ajs_user_traits</code>) [135, 136].
+                        </div>
+                        <div class="code-block"><pre><span style="color: #6A9955;">// Check current state</span>
+<span style="color: #DCDCAA;">console</span>.<span style="color: #DCDCAA;">log</span>(<span style="color: #CE9178;">'Current anonymousId:'</span>, <span style="color: #9CDCFE;">analytics</span>.<span style="color: #DCDCAA;">user</span>().<span style="color: #DCDCAA;">anonymousId</span>());
+<span style="color: #DCDCAA;">console</span>.<span style="color: #DCDCAA;">log</span>(<span style="color: #CE9178;">'Current traits:'</span>, <span style="color: #9CDCFE;">analytics</span>.<span style="color: #DCDCAA;">user</span>().<span style="color: #DCDCAA;">traits</span>());</pre></div>
+                        <button class="btn" onclick="runStep1()">Run Step 1</button>
+                        <div class="step-note">
+                            💡 This sets the baseline for testing persistence.
+                        </div>
+                    </div>
+
+                    <!-- Step 2: Identify with Email -->
+                    <div class="step">
+                        <div class="step-header">
+                            <div class="step-number">2</div>
+                            <div class="step-title">Identify User and Save Email</div>
+                        </div>
+                        <div class="step-description">
+                            Send an <code>Identify</code> call with ONLY an `email` trait (NO userId). This ensures the email is saved to <code>localStorage</code> (<code>ajs_user_traits</code>) while keeping Segment anonymous. The destination middleware will override userId to email ONLY for MoEngage.
+                        </div>
+                        <div class="code-block"><pre><span style="color: #6A9955;">// Identify call: Email is stored in localStorage.ajs_user_traits</span>
+<span style="color: #6A9955;">// NO userId parameter - Segment stays anonymous</span>
+<span style="color: #9CDCFE;">analytics</span>.<span style="color: #DCDCAA;">identify</span>({
+    <span style="color: #9CDCFE;">name</span>: <span style="color: #CE9178;">'Jane Doe'</span>,
+    <span style="color: #9CDCFE;">email</span>: <span style="color: #CE9178;">'test_user@example.com'</span> 
+});
+
+<span style="color: #6A9955;">// Result: Segment gets anonymousId only</span>
+<span style="color: #6A9955;">// Result: MoEngage gets email as userId (via middleware)</span></pre></div>
+                        <button class="btn" onclick="runStep2()">Run Step 2 - Send Identify</button>
+                        <div class="step-note">
+                            💡 This saves email to traits WITHOUT creating a userId in Segment. MoEngage middleware will set email as userId.
+                        </div>
+                    </div>
+
+                    <!-- Step 3: Track Standard Event (Goal 1 Test - Persistence) -->
+                    <div class="step">
+                        <div class="step-header">
+                            <div class="step-number">3</div>
+                            <div class="step-title">Track Standard Event (Goal 1: Email as userId)</div>
+                        </div>
+                        <div class="step-description">
+                            Fire a standard Track event *without* including the email in properties. The middleware must look up the email saved in Step 2 from <code>localStorage</code> and set that email as the event's <code>userId</code> [136].
+                        </div>
+                        <div class="code-block"><pre><span style="color: #6A9955;">// Track call without explicit email in payload</span>
+<span style="color: #9CDCFE;">analytics</span>.<span style="color: #DCDCAA;">track</span>(<span style="color: #CE9178;">'Product Viewed'</span>, { <span style="color: #9CDCFE;">product_id</span>: <span style="color: #CE9178;">'P123'</span> });
+
+<span style="color: #6A9955;">// Expected Result: userId in payload == test_user@example.com</span></pre></div>
+                        <button class="btn" onclick="runStep3()">Run Step 3 - Test Goal 1</button>
+                        <div class="step-note">
+                            💡 Verify the event payload uses the email as the <code>userId</code>, overriding the default anonymousId/userId.
+                        </div>
+                    </div>
+                    
+                    <!-- Step 4: Track 'application_quoted' (Goal 1 & Goal 2 Test) -->
+                    <div class="step">
+                        <div class="step-header">
+                            <div class="step-number">4</div>
+                            <div class="step-title">Track 'application_quoted' (Critical Event with Identify)</div>
+                        </div>
+                        <div class="step-description">
+                            For critical conversion events, we first send an <code>Identify</code> call to ensure the profile exists, then wait 2 seconds before sending the <code>application_quoted</code> track event. This ensures MoEngage has a profile ready to receive the conversion event.
+                        </div>
+                        <div class="code-block"><pre><span style="color: #6A9955;">// Step 1: Send identify to create/update profile</span>
+<span style="color: #9CDCFE;">analytics</span>.<span style="color: #DCDCAA;">identify</span>({ <span style="color: #9CDCFE;">email</span>: <span style="color: #CE9178;">'test_user@example.com'</span> });
+
+<span style="color: #6A9955;">// Step 2: Wait 2 seconds</span>
+<span style="color: #DCDCAA;">setTimeout</span>(() => {
+  <span style="color: #6A9955;">// Step 3: Send critical conversion track event</span>
+  <span style="color: #9CDCFE;">analytics</span>.<span style="color: #DCDCAA;">track</span>(<span style="color: #CE9178;">'application_quoted'</span>, { <span style="color: #9CDCFE;">type</span>: <span style="color: #CE9178;">'car insurance'</span> });
+}, <span style="color: #B5CEA8;">2000</span>);
+
+<span style="color: #6A9955;">// Expected Result: </span>
+<span style="color: #6A9955;">// 1. Identify event fires (MoEngage gets userId as email)</span>
+<span style="color: #6A9955;">// 2. 2-second delay</span>
+<span style="color: #6A9955;">// 3. Track event fires (MoEngage gets userId as email)</span></pre></div>
+                        <button class="btn" onclick="runStep4()">Run Step 4 - Test application_quoted</button>
+                        <div class="step-note">
+                            💡 You'll see the identify call, a 2-second pause, then the track event. Both should have email as userId for MoEngage.
+                        </div>
+                    </div>
+                    
+                    <!-- Step 5: Track 'purchase' (Critical Event) -->
+                    <div class="step">
+                        <div class="step-header">
+                            <div class="step-number">5</div>
+                            <div class="step-title">Track 'purchase' (Critical Event with Identify)</div>
+                        </div>
+                        <div class="step-description">
+                            Same pattern as Step 4: send an <code>Identify</code> call first, wait 2 seconds, then send the <code>purchase</code> track event. This ensures profile persistence for conversion tracking.
+                        </div>
+                        <div class="code-block"><pre><span style="color: #6A9955;">// Step 1: Send identify to create/update profile</span>
+<span style="color: #9CDCFE;">analytics</span>.<span style="color: #DCDCAA;">identify</span>({ <span style="color: #9CDCFE;">email</span>: <span style="color: #CE9178;">'test_user@example.com'</span> });
+
+<span style="color: #6A9955;">// Step 2: Wait 2 seconds</span>
+<span style="color: #DCDCAA;">setTimeout</span>(() => {
+  <span style="color: #6A9955;">// Step 3: Send critical conversion track event</span>
+  <span style="color: #9CDCFE;">analytics</span>.<span style="color: #DCDCAA;">track</span>(<span style="color: #CE9178;">'purchase'</span>, { <span style="color: #9CDCFE;">order_id</span>: <span style="color: #CE9178;">'ORD-1001'</span> });
+}, <span style="color: #B5CEA8;">2000</span>);
+
+<span style="color: #6A9955;">// Expected Result:</span>
+<span style="color: #6A9955;">// 1. Identify event fires (MoEngage gets userId as email)</span>
+<span style="color: #6A9955;">// 2. 2-second delay</span>
+<span style="color: #6A9955;">// 3. Track event fires (MoEngage gets userId as email)</span></pre></div>
+                        <button class="btn" onclick="runStep5()">Run Step 5 - Test purchase</button>
+                        <div class="step-note">
+                            💡 This ensures the identify-then-track pattern works consistently for all critical conversion events.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RIGHT COLUMN: Results -->
+            <div class="right-column">
+                <div class="status-panel">
+                    <h3>📊 Current Status</h3>
+                    <div class="status-item">
+                        <span class="status-label">Middleware Target:</span>
+                        <span class="status-value">MoEngage (Device Mode)</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Test Status:</span>
+                        <span class="status-value" id="statusMessage">Awaiting steps...</span>
+                    </div>
+                    
+                    <!-- New tracking fields -->
+                    <div style="border-top: 2px solid #dee2e6; margin-top: 15px; padding-top: 15px;">
+                        <h4 style="margin-bottom: 10px; color: #333; font-size: 0.9em;">Tracked Values:</h4>
+                        
+                        <div class="status-item">
+                            <span class="status-label">Email:</span>
+                            <span class="status-value" id="emailStatus">null</span>
+                        </div>
+                        
+                        <div class="status-item">
+                            <span class="status-label" style="color: #c586c0; font-weight: bold;">userId (sent to MoEngage):</span>
+                            <span class="status-value" id="userIdMoEngage" style="color: #c586c0;">null</span>
+                        </div>
+                        
+                        <div class="status-item">
+                            <span class="status-label" style="color: #4ec9b0; font-weight: bold;">userId (sent to Segment):</span>
+                            <span class="status-value" id="userIdSegment" style="color: #4ec9b0;">null</span>
+                        </div>
+                        
+                        <div class="status-item">
+                            <span class="status-label">anonymousId (both):</span>
+                            <span class="status-value" id="anonymousIdStatus">N/A</span>
+                        </div>
+                        
+                        <div class="status-item">
+                            <span class="status-label">localStorage Cookie:</span>
+                            <span class="status-value" id="ajsAnonymousIdCookie">None</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="console-panel">
+                    <h3>📝 Console Log</h3>
+                    <div class="console-log" id="consoleLog">
+                        <div class="log-entry log-info">📋 Console output will appear here...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Implementation Guide Section -->
+        <div style="max-width: 1400px; margin: 40px auto; padding: 30px; background: #f8f9fa; border-radius: 8px; border: 2px solid #dee2e6;">
+            <h2 style="color: #333; margin-bottom: 20px; font-size: 2em;">📋 Implementation Guide</h2>
+            <p style="color: #666; line-height: 1.6; margin-bottom: 20px;">
+                To implement the MoEngage Identity Middleware in your production environment, add the destination middleware function to your JavaScript initialization code. This middleware must be registered using <code>analytics.addDestinationMiddleware()</code> [133]. Ensure the destination name provided matches the configuration name in your Segment UI (e.g., <code>'MoEngage'</code>).
+            </p>
+
+            <div style="background: #fff; border: 1px solid #dee2e6; border-radius: 6px; padding: 20px; margin-bottom: 20px;">
+                <h3 style="color: #555; margin-bottom: 15px; font-size: 1.2em;">📦 Complete Implementation Code</h3>
+                <div style="background: #2d2d2d; color: #f8f8f2; padding: 20px; border-radius: 6px; overflow-x: auto; font-family: 'Courier New', monospace; font-size: 0.9em; line-height: 1.6;">
+<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">
+<span style="color: #6A9955;">// ===============================</span>
+<span style="color: #6A9955;">// MOENGAGE DESTINATION MIDDLEWARE</span>
+<span style="color: #6A9955;">// ===============================</span>
+
+<span style="color: #C586C0;">const</span> <span style="color: #4FC1FF;">MOENGAGE_DESTINATION_NAME</span> = <span style="color: #CE9178;">'MoEngage'</span>; <span style="color: #6A9955;">// REPLACE with the exact Destination Name from Segment UI</span>
+
+<span style="color: #C586C0;">const</span> <span style="color: #DCDCAA;">moengageProfileUpdateMiddleware</span> = ({ <span style="color: #9CDCFE;">payload</span>, <span style="color: #9CDCFE;">next</span>, <span style="color: #9CDCFE;">integration</span> }) => {
+    <span style="color: #C586C0;">const</span> <span style="color: #9CDCFE;">event</span> = <span style="color: #9CDCFE;">payload</span>.<span style="color: #9CDCFE;">obj</span>;
+    <span style="color: #C586C0;">let</span> <span style="color: #9CDCFE;">email</span> = <span style="color: #569CD6;">null</span>;
+    
+    <span style="color: #6A9955;">// Helper to safely retrieve email from Segment's stored traits</span>
+    <span style="color: #C586C0;">const</span> <span style="color: #DCDCAA;">getStoredEmail</span> = () => {
+        <span style="color: #C586C0;">try</span> {
+            <span style="color: #C586C0;">const</span> <span style="color: #9CDCFE;">storedTraitsStr</span> = <span style="color: #9CDCFE;">localStorage</span>.<span style="color: #DCDCAA;">getItem</span>(<span style="color: #CE9178;">'ajs_user_traits'</span>);
+            <span style="color: #C586C0;">if</span> (<span style="color: #9CDCFE;">storedTraitsStr</span>) {
+                <span style="color: #C586C0;">const</span> <span style="color: #9CDCFE;">storedTraits</span> = <span style="color: #4EC9B0;">JSON</span>.<span style="color: #DCDCAA;">parse</span>(<span style="color: #9CDCFE;">storedTraitsStr</span>);
+                <span style="color: #C586C0;">return</span> <span style="color: #9CDCFE;">storedTraits</span>.<span style="color: #9CDCFE;">email</span> || <span style="color: #9CDCFE;">storedTraits</span>.<span style="color: #9CDCFE;">stated_email</span>;
+            }
+        } <span style="color: #C586C0;">catch</span> (<span style="color: #9CDCFE;">e</span>) {
+            <span style="color: #DCDCAA;">console</span>.<span style="color: #DCDCAA;">error</span>(<span style="color: #CE9178;">'[MoEngage Middleware] Error accessing localStorage:'</span>, <span style="color: #9CDCFE;">e</span>);
+        }
+        <span style="color: #C586C0;">return</span> <span style="color: #569CD6;">null</span>;
+    };
+
+    <span style="color: #6A9955;">// 1. Find the best email available (payload or persistence)</span>
+    <span style="color: #6A9955;">// Check traits (Identify calls)</span>
+    <span style="color: #C586C0;">if</span> (<span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">traits</span>) {
+        <span style="color: #9CDCFE;">email</span> = <span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">traits</span>.<span style="color: #9CDCFE;">email</span> || <span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">traits</span>.<span style="color: #9CDCFE;">stated_email</span>;
+    }
+    
+    <span style="color: #6A9955;">// Check properties (Track/Page calls)</span>
+    <span style="color: #C586C0;">if</span> (!<span style="color: #9CDCFE;">email</span> && <span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">properties</span>) {
+        <span style="color: #9CDCFE;">email</span> = <span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">properties</span>.<span style="color: #9CDCFE;">email</span> || <span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">properties</span>.<span style="color: #9CDCFE;">stated_email</span>;
+    }
+
+    <span style="color: #6A9955;">// Check localStorage fallback</span>
+    <span style="color: #C586C0;">if</span> (!<span style="color: #9CDCFE;">email</span>) {
+        <span style="color: #9CDCFE;">email</span> = <span style="color: #DCDCAA;">getStoredEmail</span>();
+    }
+
+    <span style="color: #6A9955;">// --- GOAL 1: Update userId to email if email exists ---</span>
+    <span style="color: #C586C0;">if</span> (<span style="color: #9CDCFE;">email</span>) {
+        <span style="color: #C586C0;">if</span> (<span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">userId</span> !== <span style="color: #9CDCFE;">email</span>) {
+            <span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">userId</span> = <span style="color: #9CDCFE;">email</span>;
+            <span style="color: #DCDCAA;">console</span>.<span style="color: #DCDCAA;">log</span>(<span style="color: #CE9178;">`[MoEngage Middleware] Goal 1: Overrode userId to email: <span style="color: #569CD6;">${<span style="color: #9CDCFE;">email</span>}</span> for event type: <span style="color: #569CD6;">${<span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">type</span>}</span>`</span>);
+        }
+        
+        <span style="color: #6A9955;">// Add email to appropriate fields based on event type</span>
+        <span style="color: #C586C0;">if</span> (<span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">type</span> === <span style="color: #CE9178;">'identify'</span>) {
+            <span style="color: #6A9955;">// For identify: add to traits and context.traits</span>
+            <span style="color: #C586C0;">if</span> (!<span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">traits</span>) <span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">traits</span> = {};
+            <span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">traits</span>.<span style="color: #9CDCFE;">email</span> = <span style="color: #9CDCFE;">email</span>;
+            
+            <span style="color: #C586C0;">if</span> (!<span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">context</span>) <span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">context</span> = {};
+            <span style="color: #C586C0;">if</span> (!<span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">context</span>.<span style="color: #9CDCFE;">traits</span>) <span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">context</span>.<span style="color: #9CDCFE;">traits</span> = {};
+            <span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">context</span>.<span style="color: #9CDCFE;">traits</span>.<span style="color: #9CDCFE;">email</span> = <span style="color: #9CDCFE;">email</span>;
+            
+            <span style="color: #DCDCAA;">console</span>.<span style="color: #DCDCAA;">log</span>(<span style="color: #CE9178;">`[MoEngage Middleware] Added email to traits and context.traits for identify event`</span>);
+        } <span style="color: #C586C0;">else if</span> (<span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">type</span> === <span style="color: #CE9178;">'track'</span> || <span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">type</span> === <span style="color: #CE9178;">'page'</span>) {
+            <span style="color: #6A9955;">// For track/page: add to properties and context.traits</span>
+            <span style="color: #C586C0;">if</span> (!<span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">properties</span>) <span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">properties</span> = {};
+            <span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">properties</span>.<span style="color: #9CDCFE;">email</span> = <span style="color: #9CDCFE;">email</span>;
+            
+            <span style="color: #C586C0;">if</span> (!<span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">context</span>) <span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">context</span> = {};
+            <span style="color: #C586C0;">if</span> (!<span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">context</span>.<span style="color: #9CDCFE;">traits</span>) <span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">context</span>.<span style="color: #9CDCFE;">traits</span> = {};
+            <span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">context</span>.<span style="color: #9CDCFE;">traits</span>.<span style="color: #9CDCFE;">email</span> = <span style="color: #9CDCFE;">email</span>;
+            
+            <span style="color: #DCDCAA;">console</span>.<span style="color: #DCDCAA;">log</span>(<span style="color: #CE9178;">`[MoEngage Middleware] Added email to properties and context.traits for <span style="color: #569CD6;">${<span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">type</span>}</span> event`</span>);
+        }
+    }
+
+    <span style="color: #6A9955;">// --- GOAL 2: Force Identify on specific Track events ---</span>
+    <span style="color: #6A9955;">// NOTE: We log critical events but don't call analytics.identify() </span>
+    <span style="color: #6A9955;">// because that would affect ALL destinations (including Segment)</span>
+    <span style="color: #C586C0;">if</span> (<span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">type</span> === <span style="color: #CE9178;">'track'</span>) {
+        <span style="color: #C586C0;">const</span> <span style="color: #9CDCFE;">eventName</span> = <span style="color: #9CDCFE;">event</span>.<span style="color: #9CDCFE;">event</span>;
+        
+        <span style="color: #C586C0;">if</span> (<span style="color: #9CDCFE;">eventName</span> === <span style="color: #CE9178;">'application_quoted'</span> || <span style="color: #9CDCFE;">eventName</span> === <span style="color: #CE9178;">'purchase'</span>) {
+            <span style="color: #C586C0;">if</span> (<span style="color: #9CDCFE;">email</span>) {
+                <span style="color: #DCDCAA;">console</span>.<span style="color: #DCDCAA;">log</span>(<span style="color: #CE9178;">`[MoEngage Middleware] Goal 2: Critical event '<span style="color: #569CD6;">${<span style="color: #9CDCFE;">eventName</span>}</span>' detected.`</span>);
+                <span style="color: #DCDCAA;">console</span>.<span style="color: #DCDCAA;">log</span>(<span style="color: #CE9178;">`[MoEngage Middleware] The track event will be sent to MoEngage with userId: <span style="color: #569CD6;">${<span style="color: #9CDCFE;">email</span>}</span>`</span>);
+                <span style="color: #DCDCAA;">console</span>.<span style="color: #DCDCAA;">log</span>(<span style="color: #CE9178;">`[MoEngage Middleware] Note: To ensure profile creation, manually call analytics.identify() in your production code before these events if needed.`</span>);
+                
+                <span style="color: #6A9955;">// The track event already has userId set to email (from Goal 1)</span>
+                <span style="color: #6A9955;">// This is sufficient for MoEngage to create/update the profile</span>
+                <span style="color: #6A9955;">// We don't call analytics.identify() here because that would affect ALL destinations</span>
+            } <span style="color: #C586C0;">else</span> {
+                <span style="color: #DCDCAA;">console</span>.<span style="color: #DCDCAA;">log</span>(<span style="color: #CE9178;">`[MoEngage Middleware] Goal 2: Event '<span style="color: #569CD6;">${<span style="color: #9CDCFE;">eventName</span>}</span>' has no email - profile may not be created.`</span>);
+            }
+        }
+    }
+    
+    <span style="color: #6A9955;">// Pass the modified payload to the destination (MoEngage)</span>
+    <span style="color: #DCDCAA;">next</span>(<span style="color: #9CDCFE;">payload</span>);
+};
+
+<span style="color: #6A9955;">// Register the middleware (Run this after the Segment snippet loads)</span>
+<span style="color: #9CDCFE;">analytics</span>.<span style="color: #DCDCAA;">addDestinationMiddleware</span>(<span style="color: #4FC1FF;">MOENGAGE_DESTINATION_NAME</span>, <span style="color: #DCDCAA;">moengageProfileUpdateMiddleware</span>);
+<span style="color: #DCDCAA;">console</span>.<span style="color: #DCDCAA;">log</span>(<span style="color: #CE9178;">`[MoEngage Middleware] Registered destination middleware for <span style="color: #569CD6;">${<span style="color: #4FC1FF;">MOENGAGE_DESTINATION_NAME</span>}</span>`</span>);
+</pre>
+                </div>
+            </div>
+
+            <div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 6px; padding: 20px; margin-bottom: 20px; max-width: 1400px;">
+                <h3 style="color: #856404; margin-bottom: 15px; font-size: 1.2em;">⚠️ Important Implementation Notes</h3>
+                <ul style="color: #856404; line-height: 1.8; margin-left: 20px;">
+                    <li><strong>Integration Name:</strong> You MUST replace <code>'MoEngage'</code> with the exact Destination Name (case-sensitive) as listed in your Segment UI.</li>
+                    <li><strong>Middleware Type:</strong> This is a <strong>destination middleware</strong>, meaning it only modifies events being sent to MoEngage. Events sent to Segment and other destinations remain unchanged (they continue to use anonymousId).</li>
+                    <li><strong>userId Override:</strong> When an email is found, the middleware checks if <code>event.userId !== email</code> before setting it. This override ONLY affects the payload sent to MoEngage. The original event sent to Segment retains its original userId/anonymousId.</li>
+                    <li><strong>Email Placement by Event Type:</strong>
+                        <ul style="margin-top: 10px; margin-left: 20px;">
+                            <li><strong>Identify events:</strong> Email is added to <code>traits.email</code> and <code>context.traits.email</code></li>
+                            <li><strong>Track/Page events:</strong> Email is added to <code>properties.email</code> and <code>context.traits.email</code></li>
+                        </ul>
+                    </li>
+                    <li><strong>No Global Identify Calls:</strong> The middleware does NOT call <code>analytics.identify()</code> because that would set userId globally for ALL destinations. It only modifies the event payload going to MoEngage.</li>
+                    <li><strong>Critical Conversion Events:</strong> For events like <code>application_quoted</code> or <code>purchase</code>, you should send an <code>analytics.identify()</code> call BEFORE the track event (with a 2-second delay) to ensure the MoEngage profile exists before the conversion is recorded. Example:
+                        <pre style="background: #f0f0f0; padding: 10px; border-radius: 4px; margin-top: 10px; font-size: 0.9em;">// Step 1: Send identify first
+analytics.identify({ email: 'user@example.com' });
+
+// Step 2: Wait 2 seconds
+setTimeout(() => {
+  analytics.track('application_quoted', { ... });
+}, 2000);</pre>
+                    </li>
+                    <li><strong>Persistence:</strong> The middleware relies on Segment automatically caching user traits in the browser's <code>localStorage</code> (key: <code>ajs_user_traits</code>) after an <code>analytics.identify()</code> call is made. This allows the middleware to retrieve the email even when it's not explicitly passed in the event payload.</li>
+                    <li><strong>Browser Console Logging:</strong> The middleware logs helpful debugging information to the browser console, including:
+                        <ul style="margin-top: 5px;">
+                            <li>When userId is overridden to email</li>
+                            <li>Which fields email was added to (traits/properties/context)</li>
+                            <li>When critical conversion events are detected</li>
+                        </ul>
+                    </li>
+                    <li><strong>Profile Creation:</strong> MoEngage will create/update user profiles based on the userId (email) in the modified events. Track events with userId are sufficient for profile creation in MoEngage.</li>
+                </ul>
+            </div>
+
+            <div style="background: #d1ecf1; border: 1px solid #17a2b8; border-radius: 6px; padding: 20px; margin-top: 20px; max-width: 1400px;">
+                <h3 style="color: #0c5460; margin-bottom: 15px; font-size: 1.2em;">🔍 How to Verify It's Working</h3>
+                <div style="color: #0c5460; line-height: 1.8;">
+                    <p style="margin-bottom: 15px;"><strong>1. Check Browser Console Logs</strong></p>
+                    <ul style="margin-left: 20px; margin-bottom: 20px;">
+                        <li>Look for <code>[MoEngage Middleware] Goal 1: Overrode userId to email: ...</code></li>
+                        <li>Look for <code>[MoEngage Middleware] Added email to traits and context.traits for identify event</code></li>
+                        <li>Look for <code>[MoEngage Middleware] Added email to properties and context.traits for track event</code></li>
+                        <li>For critical events, look for <code>[MoEngage Middleware] Goal 2: Critical event 'application_quoted' detected</code></li>
+                        <li>The logs will confirm:
+                            <ul style="margin-top: 5px;">
+                                <li>userId was set to the email address</li>
+                                <li>Email was added to the correct fields based on event type</li>
+                                <li>Critical conversion events were detected</li>
+                            </ul>
+                        </li>
+                    </ul>
+
+                    <p style="margin-bottom: 15px;"><strong>2. Check Segment Debugger</strong></p>
+                    <ul style="margin-left: 20px; margin-bottom: 20px;">
+                        <li>Events in Segment's raw data should still show the original anonymousId</li>
+                        <li>Email should appear in <code>traits</code> (identify) or <code>properties</code> (track/page)</li>
+                        <li>Only events routed to MoEngage should have userId set to email</li>
+                        <li>This confirms the middleware only affects the MoEngage destination</li>
+                    </ul>
+
+                    <p style="margin-bottom: 15px;"><strong>3. Check MoEngage Dashboard</strong></p>
+                    <ul style="margin-left: 20px; margin-bottom: 20px;">
+                        <li>Log into your MoEngage dashboard and check the user profiles</li>
+                        <li>Look for users with email addresses as their User ID</li>
+                        <li>Verify that events are being attributed to the correct email-based profiles</li>
+                        <li>Check that critical events (application_quoted, purchase) are showing up on user timelines</li>
+                    </ul>
+
+                    <p style="margin-bottom: 15px;"><strong>4. Use This Testing Page</strong></p>
+                    <ul style="margin-left: 20px;">
+                        <li>Use the color-coded console log on this page:
+                            <ul style="margin-top: 5px;">
+                                <li><span style="color: #4ec9b0; font-weight: bold;">Green events</span> = Original events sent to Segment</li>
+                                <li><span style="color: #c586c0; font-weight: bold;">Purple events</span> = Modified events sent to MoEngage</li>
+                            </ul>
+                        </li>
+                        <li>Expand the collapsible event payloads to see:
+                            <ul style="margin-top: 5px;">
+                                <li><strong>userId</strong>, <strong>anonymousId</strong>, <strong>email</strong>, <strong>event</strong> fields highlighted in the destination's color</li>
+                                <li>Verify email is in the correct location (traits vs properties)</li>
+                                <li>Compare Segment (green) vs MoEngage (purple) payloads side-by-side</li>
+                            </ul>
+                        </li>
+                        <li>Follow the testing steps (1-5) to simulate the full user journey</li>
+                        <li>Check the Status Panel to see tracked values in real-time</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</body>
+</html>

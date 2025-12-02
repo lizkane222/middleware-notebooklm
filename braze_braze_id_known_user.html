@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Braze Auto-Identify Destination Middleware Testing</title>
+    <script type="text/javascript">
+
+        // ===============================
+        // ===============================
+        // STEP 1: SEGMENT ANALYTICS SNIPPET (Part A)
+        // ===============================
+        
+        !function(){
+            var analytics=window.analytics=window.analytics||[];
+            if(!analytics.initialize)
+            if(analytics.invoked)
+            window.console&&console.error&&console.error("Segment snippet included twice.");
+            else{
+                !function(){var i="analytics",analytics=window[i]=window[i]||[];if(!analytics.initialize)if(analytics.invoked)window.console&&console.error&&console.error("Segment snippet included twice.");else{analytics.invoked=!0;analytics.methods=["trackSubmit","trackClick","trackLink","trackForm","pageview","identify","reset","group","track","ready","alias","debug","page","screen","once","off","on","addSourceMiddleware","addIntegrationMiddleware","setAnonymousId","addDestinationMiddleware","register"];analytics.factory=function(e){return function(){if(window[i].initialized)return window[i][e].apply(window[i],arguments);var n=Array.prototype.slice.call(arguments);if(["track","screen","alias","group","page","identify"].indexOf(e)>-1){var c=document.querySelector("link[rel='canonical']");n.push({__t:"bpc",c:c&&c.getAttribute("href")||void 0,p:location.pathname,u:location.href,s:location.search,t:document.title,r:document.referrer})}n.unshift(e);analytics.push(n);return analytics}};for(var n=0;n<analytics.methods.length;n++){var key=analytics.methods[n];analytics[key]=analytics.factory(key)}analytics.load=function(key,n){var t=document.createElement("script");t.type="text/javascript";t.async=!0;t.setAttribute("data-global-segment-analytics-key",i);t.src="https://cdn.segment.com/analytics.js/v1/" + key + "/analytics.min.js";var r=document.getElementsByTagName("script")[0];r.parentNode.insertBefore(t,r);analytics._loadOptions=n};analytics._writeKey="GHWp3Jhvn2GBHxspEdZBRVhDmJKM4XC1";;analytics.SNIPPET_VERSION="5.2.0";
+                analytics.load("GHWp3Jhvn2GBHxspEdZBRVhDmJKM4XC1");
+                analytics.page();
+                }}();
+            }
+        }();
+
+        // ===============================
+        // STEP 2: EVENT LOGGER MIDDLEWARE (Part B)
+        // Logs all events to the UI console (required component) [7]
+        // ===============================
+
+        analytics.addSourceMiddleware(function({ payload, next }) { [8]
+            setTimeout(function() {
+                if (typeof logToConsole === 'function') {
+                    const eventType = payload.obj.type;
+                    const eventName = payload.obj.event || eventType;
+                    logToConsole(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, 'info');
+                    logToConsole(`📡 ${eventType.toUpperCase()} Event: ${eventName}`, 'success'); [7, 9]
+                    logToConsole(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, 'info');
+                    const jsonPayload = JSON.stringify(payload.obj, null, 2);
+                    logToConsole(jsonPayload, 'json');
+                    logToConsole(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, 'info');
+                } else {
+                    console.log('[EVENT LOGGER] Event captured:', payload.obj.type, payload.obj.event || '', payload.obj); [10, 11]
+                }
+            }, 50);
+            next(payload);
+        });
+        console.log('[EVENT LOGGER] Source middleware registered - all events will be logged to UI console');
+
+        // ===============================
+        // STEP 3: CUSTOM MIDDLEWARE LOGIC (Part C)
+        // Braze Auto-Identify Destination Middleware
+        // ===============================
+
+        const BRAZE_DESTINATION_NAME = 'Braze Web Mode (Actions)'; // Destination target [12-14]
+
+        const brazeAutoIdentifyEnforcer = function({ payload, next, integrations }) {
+            try {
+                const event = payload.obj;
+                let traitsToSend = {};
+                let shouldIdentify = false;
+                let identificationId = event.userId || event.anonymousId;
+
+                // 1. Determine where traits/properties might live based on event type
+                let context = {};
+                if (event.type === 'identify') {
+                    context = event.traits || {};
+                } else {
+                    // Check properties (track, page) and context traits (all events)
+                    context = { 
+                        ...(event.properties || {}), 
+                        ...(event.traits || {}),
+                        ...(event.context?.traits || {})
+                    };
+                }
+
+                // 2. Define target PII fields (including Braze-preferred names [15])
+                const targetFields = ['userId', 'email', 'phone', 'stated_email', 'stated_phone'];
+
+                targetFields.forEach(field => {
+                    let value = context[field] || event[field]; 
+
+                    if (value && typeof value === 'string' && value.trim() !== '') {
+                        
+                        // Map fields to standard Identify traits
+                        if (field === 'stated_email' || field === 'email') {
+                            traitsToSend.email = value;
+                        } else if (field === 'stated_phone' || field === 'phone') {
+                            traitsToSend.phone = value;
+                        } else if (field === 'userId' && !identificationId) {
+                            identificationId = value; // Capture userId if not already set at the event level
+                        }
+                        shouldIdentify = true;
+                    }
+                });
+
+                if (shouldIdentify) {
+                    // Ensure we have an ID for the identify call (use current userId or anonymousId)
+                    if (!identificationId) {
+                        identificationId = analytics.user().anonymousId();
+                    }
+
+                    console.log(`[Braze Auto-Identify] PII detected (${Object.keys(traitsToSend).join(', ')}). Triggering Identify call for profile update.`);
+
+                    // Trigger a new analytics.identify() call to update the user profile
+                    if (identificationId) {
+                        analytics.identify(identificationId, traitsToSend);
+                    } else if (Object.keys(traitsToSend).length > 0) {
+                        analytics.identify(traitsToSend);
+                    }
+                }
+
+                // Always pass the original event through to its destination
+                next(payload);
+
+            } catch (e) {
+                console.error('[Braze Auto-Identify Middleware Error]', e);
+                next(payload); // fail open [10]
+            }
+        };
+
+
+        // ===============================
+        // UI HELPER FUNCTIONS (Part E)
+        // ===============================
+
+        function logToConsole(message, type = 'info') { [16, 17]
+            const consoleLog = document.getElementById('consoleLog');
+            if (!consoleLog) {
+                console.error('Console log element not found!');
+                return;
+            }
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            const timestamp = new Date().toLocaleTimeString();
+            entry.textContent = `[${timestamp}] ${message}`; [18]
+            consoleLog.appendChild(entry);
+            consoleLog.scrollTop = consoleLog.scrollHeight;
+            console.log(message);
+        }
+
+        function updateStatus() {
+            const anonId = typeof analytics !== 'undefined' && analytics.user ? analytics.user().anonymousId() : 'Not Loaded'; [19, 20]
+            const currentUserId = typeof analytics !== 'undefined' && analytics.user ? analytics.user().id() : 'Not Identified';
+            
+            document.getElementById('anonymousId').textContent = anonId; [19]
+            document.getElementById('currentUserId').textContent = currentUserId || 'None';
+            document.getElementById('middlewareTarget').textContent = BRAZE_DESTINATION_NAME;
+
+            const note = 'This middleware inspects the payload properties/traits for userId, email, or phone. If found, it triggers a separate Identify call.';
+            document.getElementById('middlewareNote').textContent = note;
+        }
+
+        // ===============================
+        // TEST STEP FUNCTIONS (Part F)
+        // ===============================
+
+        function runStep1() {
+            // Test 1: Track event containing email PII
+            logToConsole('[Step 1] Sending TRACK event with EMAIL property...', 'info');
+
+            if (typeof analytics !== 'undefined') {
+                analytics.track("Order Completed", {
+                    order_id: "T-100",
+                    total: 99.99,
+                    email: "test_user_a@braze.com" // PII field
+                }, {
+                    integrations: {
+                        "All": true,
+                        [BRAZE_DESTINATION_NAME]: true // Ensure it targets Braze
+                    }
+                });
+
+                logToConsole(`TRACK call sent: "Order Completed" with email.`, 'success');
+                alert('✓ Step 1 completed: Track event sent. Check the Console Log for TWO events (Track, followed by Auto-Identify).');
+            } else {
+                logToConsole('ERROR: Analytics not loaded', 'error');
+            }
+            updateStatus();
+        }
+
+        function runStep2() {
+            // Test 2: Page event containing phone PII (often in context or as a property)
+            logToConsole('[Step 2] Sending PAGE event with PHONE property and stated_email...', 'info');
+
+            if (typeof analytics !== 'undefined') {
+                analytics.page("Products", "Product Detail Page", {
+                    product_name: "Middleware Tool",
+                    phone: "+15551234567", // PII field
+                    stated_email: "test_user_b@braze.com" // Braze-preferred PII field
+                }, {
+                    integrations: {
+                        "All": false, // Only send to Braze
+                        [BRAZE_DESTINATION_NAME]: true 
+                    }
+                });
+
+                logToConsole(`PAGE call sent with phone and stated_email.`, 'success');
+                alert('✓ Step 2 completed: Page event sent. Check the Console Log for TWO events (Page, followed by Auto-Identify).');
+            } else {
+                logToConsole('ERROR: Analytics not loaded', 'error');
+            }
+            updateStatus();
+        }
+
+        function runStep3() {
+            // Test 3: Standard Identify call (already triggers Identify, should show redundancy check)
+            logToConsole('[Step 3] Sending standard IDENTIFY call with userId and email...', 'info');
+
+            if (typeof analytics !== 'undefined') {
+                analytics.identify({
+                    name: "Auto Identifier",
+                    email: "auto@identify.com",
+                    stated_email: "auto@identify.com",
+                });
+
+                logToConsole(`IDENTIFY call sent: `, 'success');
+                logToConsole(`NOTE: Middleware may trigger a second, redundant Identify call. The important thing is that PII traits are captured.`, 'info');
+                alert('✓ Step 3 completed: Standard Identify call sent. The middleware logic runs, but the primary Identify handles the profile update.');
+            } else {
+                logToConsole('ERROR: Analytics not loaded', 'error');
+            }
+            updateStatus();
+        }
+
+        function runStep4() {
+            // Test 4: Track event WITHOUT PII
+            logToConsole('[Step 4] Sending TRACK event *without* PII.', 'info');
+
+            if (typeof analytics !== 'undefined') {
+                analytics.track('Non-PII Event', {
+                    test_property: 'value_ok',
+                    category: 'internal'
+                }, {
+                    integrations: {
+                        [BRAZE_DESTINATION_NAME]: true 
+                    }
+                });
+                logToConsole('TRACK call sent: "Non-PII Event".', 'info');
+                logToConsole('VERIFICATION: Only ONE event should appear below (the original Track event).', 'gclid');
+                alert('✓ Step 4 completed: Track event sent. Verify only one event appeared in the console log.');
+            } else {
+                logToConsole('ERROR: Analytics not loaded', 'error');
+            }
+            updateStatus();
+        }
+
+        // ===============================
+        // RESET FUNCTION - Clear all data
+        // ===============================
+        function resetEverything() {
+            if (confirm('⚠️ This will clear ALL cookies, localStorage, and reset Segment. Continue?')) {
+                logToConsole('[RESET] Clearing all data...', 'info');
+                
+                // Reset Segment
+                if (typeof analytics !== 'undefined' && analytics.reset) {
+                    analytics.reset();
+                    logToConsole('[RESET] Segment analytics.reset() called', 'success');
+                }
+                
+                // Clear all localStorage
+                try {
+                    localStorage.clear();
+                    logToConsole('[RESET] localStorage cleared', 'success');
+                } catch (e) {
+                    logToConsole('[RESET] Error clearing localStorage: ' + e.message, 'error');
+                }
+                
+                // Clear all cookies
+                try {
+                    const cookies = document.cookie.split(';');
+                    for (let i = 0; i < cookies.length; i++) {
+                        const cookie = cookies[i];
+                        const eqPos = cookie.indexOf('=');
+                        const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim();
+                        // Clear for current path
+                        document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
+                        // Clear for root domain
+                        document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=' + window.location.hostname;
+                        // Clear for parent domain
+                        const parts = window.location.hostname.split('.');
+                        if (parts.length > 2) {
+                            const parentDomain = '.' + parts.slice(-2).join('.');
+                            document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=' + parentDomain;
+                        }
+                    }
+                    logToConsole('[RESET] All cookies cleared', 'success');
+                } catch (e) {
+                    logToConsole('[RESET] Error clearing cookies: ' + e.message, 'error');
+                }
+                
+                logToConsole('[RESET] Complete! Reloading page in 2 seconds...', 'success');
+                
+                // Reload page after 2 seconds
+                setTimeout(function() {
+                    window.location.reload();
+                }, 2000);
+            }
+        }
+
+        // ===============================
+        // INITIALIZATION LOGIC (Part H)
+        // ===============================
+        
+        // Register the middleware specifically for the Braze destination.
+        document.addEventListener('DOMContentLoaded', function() { [21]
+            const consoleLog = document.getElementById('consoleLog');
+            if (consoleLog) {
+                consoleLog.innerHTML = '';
+                logToConsole('🚀 Page loaded, initializing...', 'info');
+                logToConsole('⏳ Waiting for Analytics.js and middleware registration...', 'info');
+            }
+        });
+
+        if (typeof analytics !== 'undefined' && analytics.ready) {
+            analytics.ready(function() {
+                logToConsole('✅ Analytics.js loaded and ready', 'success');
+                try {
+                    // Register the custom destination middleware
+                    analytics.addDestinationMiddleware(BRAZE_DESTINATION_NAME, brazeAutoIdentifyEnforcer); [14]
+                    logToConsole(`✓ Braze Auto-Identify Enforcer registered as destination middleware for ${BRAZE_DESTINATION_NAME}`, 'gclid');
+                } catch (err) {
+                    logToConsole('Error registering Braze auto-identify middleware:', 'error');
+                    console.error('Error registering Braze auto-identify middleware:', err);
+                }
+                updateStatus();
+            });
+        }
+        
+        setInterval(updateStatus, 2000); // Update status every 2 seconds
+
+    </script>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1700px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            overflow: hidden;
+        }
+
+        .content {
+            display: grid;
+            grid-template-columns: 1fr 500px;
+            gap: 0;
+            min-height: calc(100vh - 200px);
+        }
+
+        .left-column {
+            padding: 30px;
+            overflow-y: auto;
+            max-height: calc(100vh - 200px);
+            border-right: 2px solid #e0e0e0;
+        }
+
+        .right-column {
+            padding: 15px;
+            background: #f8f9fa;
+            overflow-y: auto;
+            max-height: calc(100vh - 200px);
+            position: sticky;
+            top: 0;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+            position: relative;
+        }
+
+        .reset-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-size: 0.9em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .reset-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            border-color: white;
+            transform: translateY(-2px);
+        }
+
+        .reset-btn:active {
+            transform: translateY(0);
+        }
+
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .info-box {
+            background: #e7f3ff;
+            border-left: 4px solid #2196F3;
+            padding: 20px;
+            margin-bottom: 30px;
+            border-radius: 4px;
+        }
+
+        .info-box h2 {
+            color: #1976D2;
+            margin-bottom: 10px;
+            font-size: 1.3em;
+        }
+
+        .info-box p {
+            line-height: 1.6;
+            color: #555;
+        }
+
+        .test-steps h2 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        .status-panel {
+            background: white;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            padding: 2%;
+            margin-bottom: 10px;
+            max-height: 30%;
+        }
+
+        .status-panel h3 {
+            margin-bottom: 10px;
+            color: #333;
+            font-size: 1em;
+        }
+
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px;
+            background: white;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            border: 1px solid #e0e0e0;
+        }
+
+        .status-label {
+            font-size: .8em;
+            font-weight: 600;
+            color: #555;
+        }
+
+        .status-value {
+            font-size: .7em;
+            font-family: 'Courier New', monospace;
+            color: #667eea;
+            word-break: break-all;
+        }
+
+        .test-steps {
+            margin-top: 30px;
+        }
+
+        .step {
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            transition: all 0.3s;
+        }
+
+        .step:hover {
+            border-color: #667eea;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+        }
+
+        .step-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .step-number {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 1.2em;
+            margin-right: 15px;
+        }
+
+        .step-title {
+            font-size: 1.3em;
+            color: #333;
+            font-weight: 600;
+        }
+
+        .step-description {
+            color: #666;
+            line-height: 1.6;
+            margin-bottom: 15px;
+        }
+
+        .code-block {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 6px;
+            overflow-x: auto;
+            margin-bottom: 15px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        .code-block pre {
+            margin: 0;
+        }
+
+        .step-note {
+            background: #fff9e6;
+            border-left: 4px solid #ffc107;
+            padding: 12px;
+            margin-top: 15px;
+            border-radius: 4px;
+            font-size: 0.95em;
+            color: #666;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            box-shadow: 0 2px 8px rgba(108, 117, 125, 0.3);
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .success {
+            color: #28a745;
+            font-weight: bold;
+        }
+
+        .error {
+            color: #dc3545;
+            font-weight: bold;
+        }
+
+        .console-panel {
+            background: white;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            padding: 2%;
+            height: 73%;
+        }
+
+        .console-panel h3 {
+            margin-bottom: 5px;
+            color: #333;
+            font-size: 1em;
+        }
+
+        .console-log {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 4px;
+            height: 95%;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85em;
+            line-height: 1.5;
+        }
+
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 5px;
+            border-radius: 3px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .log-gclid {
+            color: #4ec9b0;
+            font-weight: bold;
+        }
+
+        .log-info {
+            color: #9cdcfe;
+        }
+
+        .log-success {
+            color: #4ec9b0;
+        }
+
+        .log-error {
+            color: #f48771;
+            font-weight: bold;
+        }
+
+        .log-json {
+            color: #ce9178;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            white-space: pre-wrap;
+            line-height: 1.6;
+        }
+
+        footer {
+            background: #f8f9fa;
+            padding: 5px;
+            text-align: center;
+            color: #666;
+            font-size: 0.75em;
+        }
+    </style>
+
+</head>
+<body>
+
+<div class="container">
+
+    <header>
+        <button class="reset-btn" onclick="resetEverything()">🔄 Reset Everything</button>
+        <h1>🔥 Braze Auto-Identify Enforcer Middleware</h1>
+        <p class="subtitle">Automatically triggers an <code>identify</code> call to Braze when PII (<code>userId</code>, <code>email</code>, or <code>phone</code>) is detected in any event.</p>
+    </header>
+
+    <div class="content">
+
+        <!-- LEFT COLUMN: Test Steps -->
+        <div class="left-column">
+
+            <div class="info-box">
+                <h2>What is this middleware?</h2>
+                <p>
+                    This is a **Destination Middleware** registered specifically for <code>Braze Web Mode (Actions)</code>. It intercepts events *just before* they are sent to Braze. 
+                </p>
+                <p style="margin-top: 10px;">
+                    If the event payload (properties or traits) contains <code>userId</code>, <code>email</code>, <code>phone</code>, <code>stated_email</code>, or <code>stated_phone</code> [15], the middleware immediately triggers a new <code>analytics.identify()</code> call containing those identifying traits. This ensures Braze receives the updated profile information immediately, regardless of whether the original event was a <code>track</code> or <code>page</code> call.
+                </p>
+            </div>
+
+            <div class="test-steps">
+                <h2>🧪 Testing Steps</h2>
+
+                <!-- Step 1: Track with PII -->
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">1</div>
+                        <div class="step-title">Track Event with Email Property</div>
+                    </div>
+                    <div class="step-description">
+                        Send a standard <code>analytics.track()</code> call which includes an <code>email</code> field in its properties.
+                    </div>
+                    <div class="code-block"><pre>// Track call with PII
+analytics.track("Order Completed", {
+    order_id: "T-100",
+    email: "test_user_a@braze.com" 
+});</pre></div>
+                    <button class="btn" onclick="runStep1()">Run Step 1 - Track with Email</button>
+                    <div class="step-note">
+                        💡 **Verification:** You should see two events in the log: the original <code>TRACK</code> event, followed immediately by a middleware-triggered <code>IDENTIFY</code> event containing the email trait.
+                    </div>
+                </div>
+
+                <!-- Step 2: Page with PII -->
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">2</div>
+                        <div class="step-title">Page Event with Phone/Stated Email</div>
+                    </div>
+                    <div class="step-description">
+                        Send a <code>analytics.page()</code> call containing both a standard <code>phone</code> property and the Braze-preferred <code>stated_email</code> property [15].
+                    </div>
+                    <div class="code-block"><pre>// Page call with PII
+analytics.page("Products", "Detail", {
+    phone: "+15551234567",
+    stated_email: "test_user_b@braze.com" ,
+    email: "test_user_b@braze.com",
+});</pre></div>
+                    <button class="btn" onclick="runStep2()">Run Step 2 - Page with Phone/Email</button>
+                    <div class="step-note">
+                        💡 **Verification:** This should also generate two events: the original <code>PAGE</code> event and the middleware-triggered <code>IDENTIFY</code> event containing both phone and email traits.
+                    </div>
+                </div>
+
+                <!-- Step 3: Redundant Identify Check -->
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">3</div>
+                        <div class="step-title">Standard Identify Call</div>
+                    </div>
+                    <div class="step-description">
+                        Send a primary <code>analytics.identify()</code> call. The middleware will still run its check and may trigger a redundant call, confirming the logic fires on all event types.
+                    </div>
+                    <div class="code-block"><pre>// Standard Identify call
+analytics.identify("user-auto-12345", {
+    name: "Auto Identifier",
+    email: "auto@identify.com"
+});</pre></div>
+                    <button class="btn" onclick="runStep3()">Run Step 3 - Standard Identify</button>
+                    <div class="step-note">
+                        💡 **Observation:** The core function of updating profile information should be handled by the first Identify event. The middleware check confirms PII is detected in the payload structure.
+                    </div>
+                </div>
+
+                <!-- Step 4: Track without PII -->
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">4</div>
+                        <div class="step-title">Track Event Without PII</div>
+                    </div>
+                    <div class="step-description">
+                        Send a standard <code>analytics.track()</code> call containing no PII fields.
+                    </div>
+                    <div class="code-block"><pre>// Track call without PII
+analytics.track('Non-PII Event', {
+    category: 'internal'
+});</pre></div>
+                    <button class="btn btn-secondary" onclick="runStep4()">Run Step 4 - Track Without PII</button>
+                    <div class="step-note">
+                        💡 **Verification:** Only ONE event (the original <code>TRACK</code> event) should be logged, confirming the auto-identify logic is passive when PII is absent.
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- RIGHT COLUMN: Results -->
+        <div class="right-column">
+
+            <div class="status-panel">
+                <h3>📊 Current Status</h3>
+                <div class="status-item">
+                    <span class="status-label">Segment Anonymous ID:</span>
+                    <span class="status-value" id="anonymousId">-</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Current User ID:</span>
+                    <span class="status-value" id="currentUserId">-</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Middleware Target:</span>
+                    <span class="status-value" id="middlewareTarget">-</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Middleware Goal:</span>
+                    <span class="status-value" id="middlewareNote">-</span>
+                </div>
+            </div>
+
+            <div class="console-panel">
+                <h3>📝 Console Log (Event Payloads)</h3>
+                <div class="console-log" id="consoleLog">
+                    <div class="log-entry log-info">📋 Console output will appear here...</div>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+
+    <!-- Implementation Guide Section -->
+    <div style="max-width: 1400px; margin: 40px auto; padding: 30px; background: #f8f9fa; border-radius: 8px; border: 2px solid #dee2e6;">
+        
+        <h2 style="color: #333; margin-bottom: 20px; font-size: 2em;">📋 Implementation Guide</h2>
+        <p style="color: #666; line-height: 1.6; margin-bottom: 20px;">
+            To implement the **Braze Auto-Identify Enforcer Middleware** in your production environment, add the following script after the Segment Analytics.js snippet, ensuring the registration occurs after <code>analytics.ready()</code> [14].
+        </p>
+
+        <div style="background: #fff; border: 1px solid #dee2e6; border-radius: 6px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="color: #555; margin-bottom: 15px; font-size: 1.2em;">📦 Complete Middleware Implementation Code (Logic + Registration)</h3>
+            <div style="background: #2d2d2d; color: #f8f8f2; padding: 20px; border-radius: 6px; overflow-x: auto; font-family: 'Courier New', monospace; font-size: 0.9em; line-height: 1.6;">
+<pre>
+&lt;script type="text/javascript"&gt;
+
+const BRAZE_DESTINATION_NAME = 'Braze Web Mode (Actions)';
+
+const brazeAutoIdentifyEnforcer = function({ payload, next, integrations }) {
+    try {
+        const event = payload.obj;
+        let traitsToSend = {};
+        let shouldIdentify = false;
+        let identificationId = event.userId || event.anonymousId;
+
+        // 1. Determine where traits/properties might live
+        let context = {};
+        if (event.type === 'identify') {
+            context = event.traits || {};
+        } else {
+            context = { 
+                ...(event.properties || {}), 
+                ...(event.traits || {}),
+                ...(event.context?.traits || {})
+            };
+        }
+
+        // 2. Check for target PII fields
+        const targetFields = ['userId', 'email', 'phone', 'stated_email', 'stated_phone'];
+
+        targetFields.forEach(field => {
+            let value = context[field] || event[field]; 
+
+            if (value && typeof value === 'string' && value.trim() !== '') {
+                
+                if (field === 'stated_email' || field === 'email') {
+                    traitsToSend.email = value;
+                } else if (field === 'stated_phone' || field === 'phone') {
+                    traitsToSend.phone = value;
+                } else if (field === 'userId' && !identificationId) {
+                    identificationId = value;
+                }
+                shouldIdentify = true;
+            }
+        });
+
+        if (shouldIdentify) {
+            if (!identificationId) {
+                // Fallback to anonymous ID if needed
+                identificationId = analytics.user().anonymousId();
+            }
+
+            console.log(`[Braze Auto-Identify] PII detected. Triggering Identify.`);
+
+            if (identificationId) {
+                analytics.identify(identificationId, traitsToSend);
+            } else if (Object.keys(traitsToSend).length > 0) {
+                analytics.identify(traitsToSend);
+            }
+        }
+
+        // Pass the original event to the next step (Braze destination)
+        next(payload);
+
+    } catch (e) {
+        console.error('[Braze Auto-Identify Middleware Error]', e);
+        next(payload); // fail open
+    }
+};
+
+
+// Registration ensures the middleware is added once Analytics.js is ready
+if (typeof analytics !== 'undefined' && analytics.ready) {
+    analytics.ready(function() {
+        try {
+            analytics.addDestinationMiddleware(BRAZE_DESTINATION_NAME, brazeAutoIdentifyEnforcer);
+            console.log('✓ Braze Auto-Identify Enforcer registered.');
+        } catch (err) {
+            console.error('Error registering Braze auto-identify middleware:', err);
+        }
+    });
+}
+&lt;/script&gt;</pre>
+            </div>
+        </div>
+
+        <div style="background: #d1ecf1; border: 1px solid #17a2b8; border-radius: 6px; padding: 20px;">
+            <h3 style="color: #0c5460; margin-bottom: 15px; font-size: 1.2em;">💡 How the Middleware Works</h3>
+            <div style="color: #0c5460; line-height: 1.8;">
+                <p style="margin-bottom: 15px;">This solution is implemented as **Destination Middleware** [44], which is necessary because it allows us to execute the logic only for the target destination, Braze [14].</p>
+                <ul style="margin-left: 20px;">
+                    <li>**Target Fields:** It explicitly checks for <code>userId</code>, <code>email</code>, <code>phone</code>, and the Braze-specific variants <code>stated_email</code> and <code>stated_phone</code> [15] within the event payload (properties and traits).</li>
+                    <li>**Auto-Identify:** If any of these fields are found, a secondary <code>analytics.identify()</code> call is executed immediately [45], ensuring that the identifying traits are properly attributed and Braze's user profile is updated, which is crucial for campaigns and messaging [46].</li>
+                </ul>
+            </div>
+        </div>
+
+    </div>
+
+    <footer>
+        <p>Braze Auto-Identify Middleware Testing | Segment Analytics.js | Referenced Middleware Template Summary</p>
+    </footer>
+
+</div>
+
+</body>
+</html>

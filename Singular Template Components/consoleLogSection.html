@@ -1,0 +1,529 @@
+<!--
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                    COLLAPSIBLE CONSOLE LOG COMPONENT                         ║
+║                                                                              ║
+║  A complete console logging system with collapsible event payloads that     ║
+║  clearly shows which events go to Segment vs other destinations.            ║
+║                                                                              ║
+║  USAGE INSTRUCTIONS:                                                         ║
+║  1. Copy the CSS section into your <style> tag                              ║
+║  2. Copy the HTML section into your desired location (typically right col)  ║
+║  3. Copy the JavaScript functions into your <script> tag                    ║
+║  4. Use logToConsole() for simple messages                                  ║
+║  5. Use logCollapsibleEvent() for event payloads                            ║
+║                                                                              ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+-->
+
+
+<!-- ============================================================================
+     SECTION 1: CSS STYLES
+     Copy this into your <style> tag
+     ============================================================================ -->
+
+<style>
+    /* Console Panel Container */
+    .console-panel {
+        background: white;
+        border: 2px solid #dee2e6;
+        border-radius: 8px;
+        padding: 2%;
+        height: 73%; /* Adjust based on your layout */
+    }
+
+    .console-panel h3 {
+        margin-bottom: 5px;
+        color: #333;
+        font-size: 1em;
+    }
+
+    /* Console Log Area */
+    .console-log {
+        background: #1e1e1e;
+        color: #d4d4d4;
+        padding: 15px;
+        border-radius: 4px;
+        height: 95%;
+        overflow-y: auto;
+        font-family: 'Courier New', monospace;
+        font-size: 0.85em;
+        line-height: 1.5;
+    }
+
+    /* Simple Log Entries */
+    .log-entry {
+        margin-bottom: 5px;
+        padding: 5px;
+        border-radius: 3px;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+
+    /* Log Entry Type Colors */
+    .log-gclid { color: #4ec9b0; font-weight: bold; }
+    .log-info { color: #9cdcfe; }
+    .log-success { color: #4ec9b0; }
+    .log-error { color: #f48771; font-weight: bold; }
+    .log-json { 
+        color: #ce9178;
+        font-family: 'Courier New', monospace;
+        font-size: 0.9em;
+        white-space: pre-wrap;
+        line-height: 1.6;
+    }
+
+    /* Collapsible Event Log Container */
+    .event-log-container {
+        margin-bottom: 15px;
+        border: 1px solid #3a3a3a;
+        border-radius: 4px;
+        overflow: hidden;
+    }
+
+    /* Event Log Header (Clickable) */
+    .event-log-header {
+        padding: 10px 15px;
+        background: #2d2d2d;
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        transition: background 0.2s;
+    }
+
+    .event-log-header:hover {
+        background: #3a3a3a;
+    }
+
+    /* Event Log Title */
+    .event-log-title {
+        font-weight: bold;
+        font-size: 0.95em;
+    }
+
+    /* Destination Color Coding */
+    .event-log-title.segment {
+        color: #4ec9b0; /* Green for Segment */
+    }
+
+    .event-log-title.moengage {
+        color: #c586c0; /* Purple for MoEngage */
+    }
+
+    .event-log-title.braze {
+        color: #f48771; /* Orange for Braze */
+    }
+
+    .event-log-title.amplitude {
+        color: #569cd6; /* Blue for Amplitude */
+    }
+
+    /* Add more destination colors as needed */
+
+    /* Toggle Indicator */
+    .event-log-toggle {
+        color: #858585;
+        font-size: 0.9em;
+    }
+
+    /* Event Log Body (Payload) */
+    .event-log-body {
+        padding: 15px;
+        background: #1e1e1e;
+        border-top: 1px solid #3a3a3a;
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.3s ease;
+    }
+
+    .event-log-body.expanded {
+        max-height: 2000px; /* Adjust if you have larger payloads */
+    }
+
+    .event-log-body pre {
+        margin: 0;
+        color: #ce9178;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+
+    /* 
+    CUSTOMIZATION NOTES:
+    - Adjust .console-panel height to fit your layout
+    - Change destination colors by adding more .event-log-title.{destination} classes
+    - Modify .event-log-body max-height if you have very large payloads
+    - Adjust font sizes for better readability
+    */
+</style>
+
+
+<!-- ============================================================================
+     SECTION 2: HTML MARKUP
+     Copy this into your desired location (typically right column)
+     ============================================================================ -->
+
+<div class="console-panel">
+    <h3>📝 Console Log</h3>
+    <div class="console-log" id="consoleLog">
+        <div class="log-entry log-info">📋 Console output will appear here...</div>
+    </div>
+</div>
+
+<!-- 
+LAYOUT NOTES:
+- This component works well in a sidebar or right column
+- Ensure parent container has defined height for proper scrolling
+- The console-log div will auto-scroll to bottom when new entries are added
+-->
+
+
+<!-- ============================================================================
+     SECTION 3: JAVASCRIPT FUNCTIONS
+     Copy this into your <script> tag
+     ============================================================================ -->
+
+<script>
+    /**
+     * Simple Console Logger
+     * Logs plain text messages to the UI console
+     * 
+     * @param {string} message - The message to log
+     * @param {string} type - Log type: 'info', 'success', 'error', 'gclid', 'json'
+     * 
+     * USAGE:
+     * logToConsole('User clicked button', 'info');
+     * logToConsole('Event sent successfully', 'success');
+     * logToConsole('API call failed', 'error');
+     */
+    function logToConsole(message, type = 'info') {
+        const consoleLog = document.getElementById('consoleLog');
+        if (!consoleLog) {
+            console.error('Console log element not found!');
+            return;
+        }
+        
+        const entry = document.createElement('div');
+        entry.className = `log-entry log-${type}`;
+        const timestamp = new Date().toLocaleTimeString();
+        entry.textContent = `[${timestamp}] ${message}`;
+        consoleLog.appendChild(entry);
+        
+        // Auto-scroll to bottom
+        consoleLog.scrollTop = consoleLog.scrollHeight;
+        
+        // Also log to browser console
+        console.log(message);
+    }
+
+    /**
+     * Collapsible Event Logger
+     * Creates a collapsible container for event payloads
+     * 
+     * @param {string} title - The event title (e.g., "Track: purchase → MoEngage")
+     * @param {object} payload - The event payload object
+     * @param {string} destinationType - The destination type for color coding ('segment', 'moengage', 'braze', etc.)
+     * 
+     * USAGE:
+     * logCollapsibleEvent('IDENTIFY → Segment', eventPayload, 'segment');
+     * logCollapsibleEvent('Track: purchase → MoEngage', modifiedPayload, 'moengage');
+     * 
+     * TITLE FORMAT RECOMMENDATIONS:
+     * - "IDENTIFY → Segment (Original)" - Original event to Segment
+     * - "Track: eventName → MoEngage (Modified)" - Modified event to destination
+     * - Use arrow (→) to show direction
+     * - Include (Original) or (Modified) to clarify transformation state
+     */
+    function logCollapsibleEvent(title, payload, destinationType) {
+        const consoleLog = document.getElementById('consoleLog');
+        if (!consoleLog) return;
+        
+        // Create container
+        const container = document.createElement('div');
+        container.className = 'event-log-container';
+        
+        // Create header (clickable)
+        const header = document.createElement('div');
+        header.className = 'event-log-header';
+        
+        const titleSpan = document.createElement('span');
+        titleSpan.className = `event-log-title ${destinationType}`;
+        titleSpan.textContent = title;
+        
+        const toggle = document.createElement('span');
+        toggle.className = 'event-log-toggle';
+        toggle.textContent = 'Click to expand ▼';
+        
+        header.appendChild(titleSpan);
+        header.appendChild(toggle);
+        
+        // Create body (collapsible payload)
+        const body = document.createElement('div');
+        body.className = 'event-log-body';
+        
+        const pre = document.createElement('pre');
+        pre.textContent = JSON.stringify(payload, null, 2);
+        body.appendChild(pre);
+        
+        // Toggle functionality
+        let isExpanded = false;
+        header.addEventListener('click', function() {
+            isExpanded = !isExpanded;
+            if (isExpanded) {
+                body.classList.add('expanded');
+                toggle.textContent = 'Click to collapse ▲';
+            } else {
+                body.classList.remove('expanded');
+                toggle.textContent = 'Click to expand ▼';
+            }
+        });
+        
+        // Assemble and append
+        container.appendChild(header);
+        container.appendChild(body);
+        consoleLog.appendChild(container);
+        
+        // Auto-scroll to bottom
+        consoleLog.scrollTop = consoleLog.scrollHeight;
+    }
+
+    /**
+     * Clear Console Log
+     * Removes all entries from the console log
+     * 
+     * USAGE:
+     * clearConsoleLog();
+     */
+    function clearConsoleLog() {
+        const consoleLog = document.getElementById('consoleLog');
+        if (consoleLog) {
+            consoleLog.innerHTML = '<div class="log-entry log-info">📋 Console cleared...</div>';
+        }
+    }
+</script>
+
+
+<!-- ============================================================================
+     SECTION 4: INTEGRATION WITH MIDDLEWARE
+     Example usage with Segment Analytics middleware
+     ============================================================================ -->
+
+<script>
+    // EXAMPLE: Source Middleware (logs original events to Segment)
+    analytics.addSourceMiddleware(function({ payload, next }) {
+        setTimeout(function() {
+            if (typeof logCollapsibleEvent === 'function') {
+                const eventType = payload.obj.type;
+                const eventName = payload.obj.event || '';
+                
+                // Create descriptive title
+                let title = eventType.toUpperCase();
+                if (eventName && eventType === 'track') {
+                    title = `Track: ${eventName}`;
+                }
+                title += ' → Segment (Original)';
+                
+                // Log the event with collapsible payload
+                logCollapsibleEvent(title, payload.obj, 'segment');
+            }
+        }, 50);
+        
+        next(payload);
+    });
+
+    // EXAMPLE: Destination Middleware (logs modified events to specific destination)
+    analytics.addDestinationMiddleware('MoEngage', function({ payload, next }) {
+        const event = payload.obj;
+        
+        // ... your middleware transformation logic ...
+        
+        // Log the modified event
+        setTimeout(function() {
+            if (typeof logCollapsibleEvent === 'function') {
+                const eventType = event.type;
+                const eventName = event.event || '';
+                
+                let title = eventType.toUpperCase();
+                if (eventName && eventType === 'track') {
+                    title = `Track: ${eventName}`;
+                }
+                title += ' → MoEngage (Modified)';
+                
+                // Log summary info first (optional)
+                logToConsole(`🔄 ${title}`, 'gclid');
+                logToConsole(`   ✓ userId: ${event.userId}`, 'success');
+                
+                // Log collapsible payload
+                logCollapsibleEvent(title, event, 'moengage');
+            }
+        }, 100);
+        
+        next(payload);
+    });
+</script>
+
+
+<!-- ============================================================================
+     SECTION 5: INTEGRATION CHECKLIST
+     ============================================================================ -->
+
+<!-- 
+□ CSS copied into <style> tag
+□ HTML markup added to page layout
+□ JavaScript functions copied into <script> tag
+□ Element with id="consoleLog" exists in DOM
+□ Parent container has appropriate height set
+□ Test logToConsole() with simple message
+□ Test logCollapsibleEvent() with sample payload
+□ Verify auto-scroll works when new entries are added
+□ Check collapsible expand/collapse behavior
+-->
+
+
+<!-- ============================================================================
+     SECTION 6: TROUBLESHOOTING
+     ============================================================================ -->
+
+<!-- 
+ISSUE: Console doesn't appear
+- Verify HTML is in your page structure
+- Check that parent container has height defined
+- Inspect element in browser DevTools
+
+ISSUE: Logs don't appear
+- Check browser console for JavaScript errors
+- Verify element id="consoleLog" exists
+- Ensure functions are defined before calling them
+
+ISSUE: Collapsible events don't expand
+- Check CSS transition properties are not being overridden
+- Verify click event listener is attached
+- Test in different browser
+
+ISSUE: Auto-scroll doesn't work
+- Check if overflow-y: auto is applied
+- Verify consoleLog.scrollHeight is being set correctly
+- Test with multiple log entries
+
+ISSUE: Colors not showing correctly
+- Verify destination type matches CSS class name
+- Check for CSS specificity conflicts
+- Inspect element styles in DevTools
+-->
+
+
+<!-- ============================================================================
+     SECTION 7: ADVANCED CUSTOMIZATION
+     ============================================================================ -->
+
+<!-- VARIANT 1: Add timestamp to collapsible events -->
+<!-- 
+<script>
+function logCollapsibleEvent(title, payload, destinationType) {
+    const timestamp = new Date().toLocaleTimeString();
+    const titleWithTime = `[${timestamp}] ${title}`;
+    
+    // ... rest of function using titleWithTime instead of title
+}
+</script>
+-->
+
+<!-- VARIANT 2: Auto-expand critical events -->
+<!-- 
+<script>
+function logCollapsibleEvent(title, payload, destinationType, autoExpand = false) {
+    // ... existing code ...
+    
+    // Auto-expand if specified
+    if (autoExpand) {
+        isExpanded = true;
+        body.classList.add('expanded');
+        toggle.textContent = 'Click to collapse ▲';
+    }
+    
+    // ... rest of function
+}
+
+// Usage:
+logCollapsibleEvent('Track: purchase → MoEngage', payload, 'moengage', true); // Auto-expanded
+</script>
+-->
+
+<!-- VARIANT 3: Add export/download functionality -->
+<!-- 
+<script>
+function exportConsoleLogs() {
+    const consoleLog = document.getElementById('consoleLog');
+    const logs = consoleLog.innerText;
+    const blob = new Blob([logs], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `console-logs-${Date.now()}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+</script>
+
+<!-- Add button to console panel -->
+<div class="console-panel">
+    <h3>📝 Console Log 
+        <button onclick="exportConsoleLogs()" style="float: right; font-size: 0.8em;">💾 Export</button>
+        <button onclick="clearConsoleLog()" style="float: right; margin-right: 10px; font-size: 0.8em;">🗑️ Clear</button>
+    </h3>
+    <div class="console-log" id="consoleLog">
+        <div class="log-entry log-info">📋 Console output will appear here...</div>
+    </div>
+</div>
+-->
+
+<!-- VARIANT 4: Filter logs by destination -->
+<!-- 
+<script>
+function filterLogsByDestination(destinationType) {
+    const containers = document.querySelectorAll('.event-log-container');
+    containers.forEach(container => {
+        const title = container.querySelector('.event-log-title');
+        if (destinationType === 'all' || title.classList.contains(destinationType)) {
+            container.style.display = 'block';
+        } else {
+            container.style.display = 'none';
+        }
+    });
+}
+</script>
+
+<!-- Add filter buttons -->
+<div class="console-panel">
+    <h3>📝 Console Log</h3>
+    <div style="margin-bottom: 10px;">
+        <button onclick="filterLogsByDestination('all')">All</button>
+        <button onclick="filterLogsByDestination('segment')">Segment</button>
+        <button onclick="filterLogsByDestination('moengage')">MoEngage</button>
+    </div>
+    <div class="console-log" id="consoleLog">
+        <div class="log-entry log-info">📋 Console output will appear here...</div>
+    </div>
+</div>
+-->
+
+
+<!-- ============================================================================
+     SECTION 8: DESTINATION COLOR PALETTE
+     Add these CSS classes for additional destinations
+     ============================================================================ -->
+
+<!-- 
+<style>
+    /* Additional Destination Colors */
+    .event-log-title.braze { color: #f48771; }        /* Orange */
+    .event-log-title.amplitude { color: #569cd6; }    /* Blue */
+    .event-log-title.mixpanel { color: #dcdcaa; }     /* Yellow */
+    .event-log-title.heap { color: #b5cea8; }         /* Light Green */
+    .event-log-title.fullstory { color: #d16969; }    /* Red */
+    .event-log-title.intercom { color: #c586c0; }     /* Purple */
+    .event-log-title.customerio { color: #4fc1ff; }   /* Cyan */
+    .event-log-title.salesforce { color: #00a1e0; }   /* Sky Blue */
+    .event-log-title.hubspot { color: #ff7a59; }      /* Coral */
+    .event-log-title.marketo { color: #5c2d91; }      /* Dark Purple */
+</style>
+-->

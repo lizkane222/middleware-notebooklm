@@ -1,0 +1,1248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Braze Deferred Load Middleware Testing</title>
+    
+    <script type="text/javascript">
+        // ===============================
+        // SEGMENT ANALYTICS SNIPPET
+        // ===============================
+        !function(){
+            var analytics=window.analytics=window.analytics||[];
+            if(!analytics.initialize)
+                if(analytics.invoked)
+                    window.console&&console.error&&console.error("Segment snippet included twice.");
+                else{
+                    analytics.invoked=!0;
+                    analytics.methods=["trackSubmit","trackClick","trackLink","trackForm","pageview","identify","reset","group","track","ready","alias","debug","page","once","off","on","addSourceMiddleware","addIntegrationMiddleware","setAnonymousId","addDestinationMiddleware"];
+                    analytics.factory=function(e){return function(){var t=Array.prototype.slice.call(arguments);t.unshift(e);analytics.push(t);return analytics}};
+                    for(var e=0;e<analytics.methods.length;e++){
+                        var key=analytics.methods[e];
+                        analytics[key]=analytics.factory(key)
+                    }
+                    analytics.load=function(key,e){
+                        var t=document.createElement("script");
+                        t.type="text/javascript";
+                        t.async=!0;
+                        t.src="https://cdn.segment.com/analytics.js/v1/" + key + "/analytics.min.js";
+                        var n=document.getElementsByTagName("script")[0];
+                        n.parentNode.insertBefore(t,n);
+                        analytics._loadOptions=e
+                    };
+                    analytics._writeKey="GHWp3Jhvn2GBHxspEdZBRVhDmJKM4XC1";
+                    analytics.SNIPPET_VERSION="4.15.3";
+                    
+                    // Load Analytics.js with your write key
+                    analytics.load("GHWp3Jhvn2GBHxspEdZBRVhDmJKM4XC1");
+                    analytics.page();
+                }
+        }();
+        
+        // ===============================
+        // EVENT LOGGER - Log all Segment events to UI console
+        // ===============================
+        analytics.addSourceMiddleware(function({ payload, next }) {
+            setTimeout(function() {
+                if (typeof logToConsole === 'function') {
+                    const eventType = payload.obj.type;
+                    const eventName = payload.obj.event || eventType;
+                    
+                    logToConsole(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, 'info');
+                    logToConsole(`📡 ${eventType.toUpperCase()} Event: ${eventName}`, 'success');
+                    logToConsole(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, 'info');
+                    
+                    const jsonPayload = JSON.stringify(payload.obj, null, 2);
+                    logToConsole(jsonPayload, 'json');
+                    
+                    logToConsole(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, 'info');
+                } else {
+                    console.log('[EVENT LOGGER] Event captured:', payload.obj.type, payload.obj.event || '', payload.obj);
+                }
+            }, 50);
+            
+            next(payload);
+        });
+        
+        console.log('[EVENT LOGGER] Middleware registered - all events will be logged to UI console');
+        
+        // ===============================
+        // BRAZE DEFERRED LOAD MIDDLEWARE
+        // ===============================
+        const brazeDeferredLoad = (function () {
+            console.log('[BRAZE DEFER] Middleware initialized');
+            window.__brazeQueue = [];
+            window.__brazeStatus = { loaded: false, queued: 0, identityField: null };
+            let brazeDeviceId = null;
+
+            function updateStatusPanel() {
+                const s = window.__brazeStatus;
+                const brazeLoadedEl = document.getElementById('brazeLoaded');
+                const queuedEventsEl = document.getElementById('queuedEvents');
+                const identityFieldEl = document.getElementById('identityField');
+                
+                if (brazeLoadedEl) brazeLoadedEl.textContent = s.loaded ? '✅ Loaded' : '❌ Not Loaded';
+                if (queuedEventsEl) queuedEventsEl.textContent = s.queued;
+                if (identityFieldEl) identityFieldEl.textContent = s.identityField || 'None yet';
+            }
+
+            function getBrazeDeviceId(callback) {
+                // Braze SDK requires a callback for getDeviceId
+                if (window.appboy && typeof window.appboy.getDeviceId === 'function') {
+                    window.appboy.getDeviceId(function(deviceId) {
+                        if (callback) callback(deviceId);
+                    });
+                } else if (brazeDeviceId) {
+                    // Use cached value if SDK not available
+                    if (callback) callback(brazeDeviceId);
+                } else {
+                    if (callback) callback(null);
+                }
+            }
+
+            function updateBrazeDeviceId() {
+                getBrazeDeviceId(function(deviceId) {
+                    if (deviceId) {
+                        brazeDeviceId = deviceId;
+                        console.log('[BRAZE DEFER] Device ID captured:', brazeDeviceId);
+                    }
+                });
+            }
+
+            function containsIdentityData(obj) {
+                if (!obj || typeof obj !== 'object') return false;
+                const fields = ['userId', 'stated_email', 'stated_phone'];
+                for (let key of fields) {
+                    if (obj[key]) {
+                        window.__brazeStatus.identityField = key;
+                        updateStatusPanel();
+                        return true;
+                    }
+                }
+                if (obj.traits && containsIdentityData(obj.traits)) return true;
+                if (obj.properties && containsIdentityData(obj.properties)) return true;
+                return false;
+            }
+
+            // The middleware function to be registered
+            const middleware = ({ payload, next }) => {
+                const obj = payload.obj || {};
+                const hasIdentity = containsIdentityData(obj);
+                const isBrazeLoaded = !!window.braze || !!window.appboy;
+                
+                // Update internal status if Braze is detected
+                if (isBrazeLoaded && !window.__brazeStatus.loaded) {
+                    window.__brazeStatus.loaded = true;
+                    console.log('[BRAZE DEFER] Braze SDK detected as already loaded');
+                    // Try to capture device_id if not already captured
+                    if (!brazeDeviceId) {
+                        updateBrazeDeviceId();
+                    }
+                }
+                
+                window.__brazeStatus.queued = window.__brazeQueue.length;
+                updateStatusPanel();
+
+                // Add Braze device_id to all events if available
+                if (brazeDeviceId && payload.obj) {
+                    payload.obj.context = payload.obj.context || {};
+                    payload.obj.context.device = payload.obj.context.device || {};
+                    payload.obj.context.device.id = brazeDeviceId;
+                }
+                
+                // ALWAYS queue events without identity fields (regardless of Braze load state)
+                if (!hasIdentity) {
+                    window.__brazeQueue.push(payload);
+                    window.__brazeStatus.queued = window.__brazeQueue.length;
+                    updateStatusPanel();
+                    console.log('[BRAZE DEFER] Queued event (waiting for identity)', obj.type, obj.event || '');
+                    return; // Don't send to Braze yet
+                }
+
+                // Identity found - check if we need to load Braze and flush queue
+                if (hasIdentity && !isBrazeLoaded) {
+                    console.log('[BRAZE DEFER] Identity found, loading Braze Web Mode (Actions)...');
+                    
+                    // Extract identity fields from the triggering event
+                    const identityData = {
+                        userId: obj.userId || obj.traits?.userId || obj.properties?.userId || null,
+                        stated_email: obj.stated_email || obj.traits?.stated_email || obj.properties?.stated_email || null,
+                        stated_phone: obj.stated_phone || obj.traits?.stated_phone || obj.properties?.stated_phone || null
+                    };
+                    
+                    console.log('[BRAZE DEFER] Captured identity data:', identityData);
+                    
+                    // Queue this triggering event too
+                    window.__brazeQueue.push(payload);
+                    window.__brazeStatus.queued = window.__brazeQueue.length;
+                    updateStatusPanel();
+                    
+                    analytics.loadDestination('Braze Web Mode (Actions)');
+                    window.__brazeStatus.loaded = true;
+                    updateStatusPanel();
+
+                    setTimeout(() => {
+                        console.log(`[BRAZE DEFER] Flushing ${window.__brazeQueue.length} queued events...`);
+                        window.__brazeQueue.forEach(evt => {
+                            if (evt.obj) {
+                                // Enrich with userId if available and not already present
+                                if (identityData.userId && !evt.obj.userId) {
+                                    evt.obj.userId = identityData.userId;
+                                    console.log(`[BRAZE DEFER] Added userId to ${evt.obj.type} event`);
+                                }
+                                
+                                // Enrich traits/properties with stated_email and stated_phone if available
+                                if (identityData.stated_email || identityData.stated_phone) {
+                                    // For identify and group events, add to traits
+                                    if (evt.obj.type === 'identify' || evt.obj.type === 'group') {
+                                        evt.obj.traits = evt.obj.traits || {};
+                                        if (identityData.stated_email && !evt.obj.traits.stated_email) {
+                                            evt.obj.traits.stated_email = identityData.stated_email;
+                                            console.log(`[BRAZE DEFER] Added stated_email to ${evt.obj.type} event traits`);
+                                        }
+                                        if (identityData.stated_phone && !evt.obj.traits.stated_phone) {
+                                            evt.obj.traits.stated_phone = identityData.stated_phone;
+                                            console.log(`[BRAZE DEFER] Added stated_phone to ${evt.obj.type} event traits`);
+                                        }
+                                    }
+                                    
+                                    // For track and page events, add to properties
+                                    if (evt.obj.type === 'track' || evt.obj.type === 'page') {
+                                        evt.obj.properties = evt.obj.properties || {};
+                                        if (identityData.stated_email && !evt.obj.properties.stated_email) {
+                                            evt.obj.properties.stated_email = identityData.stated_email;
+                                            console.log(`[BRAZE DEFER] Added stated_email to ${evt.obj.type} event properties`);
+                                        }
+                                        if (identityData.stated_phone && !evt.obj.properties.stated_phone) {
+                                            evt.obj.properties.stated_phone = identityData.stated_phone;
+                                            console.log(`[BRAZE DEFER] Added stated_phone to ${evt.obj.type} event properties`);
+                                        }
+                                    }
+                                }
+                                
+                                // Add device_id to context if available
+                                if (brazeDeviceId) {
+                                    evt.obj.context = evt.obj.context || {};
+                                    evt.obj.context.device = evt.obj.context.device || {};
+                                    evt.obj.context.device.id = brazeDeviceId;
+                                }
+                            }
+                            next(evt);
+                        });
+                        window.__brazeQueue = [];
+                        window.__brazeStatus.queued = 0;
+                        updateStatusPanel();
+                        
+                        // Capture device_id after Braze loads
+                        setTimeout(() => {
+                            updateBrazeDeviceId();
+                            
+                            // Sync anonymousId with Braze ID
+                            if (window.appboy && window.appboy.getUser) {
+                                const brazeId = window.appboy.getUser().getBrazeId();
+                                if (brazeId) {
+                                    console.log(`[BRAZE DEFER] Syncing anonymousId -> ${brazeId}`);
+                                    analytics.setAnonymousId(brazeId);
+                                }
+                            }
+                        }, 1000);
+                    }, 2000); // delay to ensure SDK initializes
+                    
+                    return; // Don't send this event immediately
+                }
+
+                // Identity found and Braze is already loaded - flush queue if any
+                if (hasIdentity && isBrazeLoaded && window.__brazeQueue.length > 0) {
+                    console.log('[BRAZE DEFER] Identity found, Braze already loaded. Flushing queue...');
+                    
+                    // Extract identity fields from the triggering event
+                    const identityData = {
+                        userId: obj.userId || obj.traits?.userId || obj.properties?.userId || null,
+                        stated_email: obj.stated_email || obj.traits?.stated_email || obj.properties?.stated_email || null,
+                        stated_phone: obj.stated_phone || obj.traits?.stated_phone || obj.properties?.stated_phone || null
+                    };
+                    
+                    console.log('[BRAZE DEFER] Captured identity data:', identityData);
+                    
+                    // Flush queued events with enrichment
+                    console.log(`[BRAZE DEFER] Flushing ${window.__brazeQueue.length} queued events...`);
+                    window.__brazeQueue.forEach(evt => {
+                        if (evt.obj) {
+                            // Enrich with userId if available and not already present
+                            if (identityData.userId && !evt.obj.userId) {
+                                evt.obj.userId = identityData.userId;
+                                console.log(`[BRAZE DEFER] Added userId to ${evt.obj.type} event`);
+                            }
+                            
+                            // Enrich traits/properties with stated_email and stated_phone if available
+                            if (identityData.stated_email || identityData.stated_phone) {
+                                // For identify and group events, add to traits
+                                if (evt.obj.type === 'identify' || evt.obj.type === 'group') {
+                                    evt.obj.traits = evt.obj.traits || {};
+                                    if (identityData.stated_email && !evt.obj.traits.stated_email) {
+                                        evt.obj.traits.stated_email = identityData.stated_email;
+                                        console.log(`[BRAZE DEFER] Added stated_email to ${evt.obj.type} event traits`);
+                                    }
+                                    if (identityData.stated_phone && !evt.obj.traits.stated_phone) {
+                                        evt.obj.traits.stated_phone = identityData.stated_phone;
+                                        console.log(`[BRAZE DEFER] Added stated_phone to ${evt.obj.type} event traits`);
+                                    }
+                                }
+                                
+                                // For track and page events, add to properties
+                                if (evt.obj.type === 'track' || evt.obj.type === 'page') {
+                                    evt.obj.properties = evt.obj.properties || {};
+                                    if (identityData.stated_email && !evt.obj.properties.stated_email) {
+                                        evt.obj.properties.stated_email = identityData.stated_email;
+                                        console.log(`[BRAZE DEFER] Added stated_email to ${evt.obj.type} event properties`);
+                                    }
+                                    if (identityData.stated_phone && !evt.obj.properties.stated_phone) {
+                                        evt.obj.properties.stated_phone = identityData.stated_phone;
+                                        console.log(`[BRAZE DEFER] Added stated_phone to ${evt.obj.type} event properties`);
+                                    }
+                                }
+                            }
+                            
+                            // Add device_id to context if available
+                            if (brazeDeviceId) {
+                                evt.obj.context = evt.obj.context || {};
+                                evt.obj.context.device = evt.obj.context.device || {};
+                                evt.obj.context.device.id = brazeDeviceId;
+                            }
+                        }
+                        next(evt);
+                    });
+                    window.__brazeQueue = [];
+                    window.__brazeStatus.queued = 0;
+                    updateStatusPanel();
+                }
+
+                // Event has identity or Braze is loaded - send normally
+                next(payload);
+            };
+
+            // Return middleware function and utility functions for testing
+            return {
+                middleware,
+                getQueue: () => window.__brazeQueue,
+                isBrazeLoaded: () => {
+                    // Check both the internal flag AND actual SDK presence
+                    const sdkPresent = !!(window.braze || window.appboy);
+                    // Update internal status if SDK is present but flag wasn't set
+                    if (sdkPresent && !window.__brazeStatus.loaded) {
+                        window.__brazeStatus.loaded = true;
+                        updateStatusPanel();
+                    }
+                    return sdkPresent;
+                },
+                getDeviceId: () => brazeDeviceId,
+                updateStatusPanel,
+                getStatus: () => window.__brazeStatus
+            };
+        })();
+
+        // ===============================
+        // REGISTER BRAZE MIDDLEWARE
+        // ===============================
+        if (typeof analytics !== 'undefined' && analytics.addDestinationMiddleware) {
+            analytics.addDestinationMiddleware('Braze Web Mode (Actions)', brazeDeferredLoad.middleware);
+            console.log('✓ Braze Deferred Load middleware registered');
+        } else {
+            console.warn('Analytics.js not available - Braze middleware not registered');
+        }
+        
+        // Initial status panel render
+        document.addEventListener('DOMContentLoaded', function() {
+            brazeDeferredLoad.updateStatusPanel();
+        });
+        
+        console.log('[BRAZE DEFER] Middleware loaded and ready');
+        
+        // ===============================
+        // DEBUG FUNCTION
+        // ===============================
+        window.checkBrazeState = function() {
+            console.log('=== Braze Middleware State ===');
+            console.log('Braze SDK Loaded:', brazeDeferredLoad.isBrazeLoaded());
+            console.log('Braze SDK Available:', typeof window.appboy !== 'undefined' || typeof window.braze !== 'undefined');
+            console.log('Status:', brazeDeferredLoad.getStatus());
+            console.log('Queued Events:', brazeDeferredLoad.getQueue().length);
+            console.log('Braze Device ID:', brazeDeferredLoad.getDeviceId());
+            console.log('Segment anonymousId:', analytics.user().anonymousId());
+            console.log('Segment userId:', analytics.user().id());
+            if (window.appboy) {
+                console.log('Braze User ID (external_id):', window.appboy.getUser()?.getUserId?.());
+                console.log('Braze ID (internal UUID):', window.appboy.getUser()?.getBrazeId?.());
+            }
+            console.log('=== End State ===');
+        };
+    </script>
+
+    <script type="text/javascript">
+        // ===============================
+        // HELPER FUNCTIONS FOR UI
+        // ===============================
+        function logToConsole(message, type = 'info') {
+            const consoleLog = document.getElementById('consoleLog');
+            if (!consoleLog) {
+                console.error('Console log element not found!');
+                return;
+            }
+            
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            
+            const timestamp = new Date().toLocaleTimeString();
+            entry.textContent = `[${timestamp}] ${message}`;
+            
+            consoleLog.appendChild(entry);
+            consoleLog.scrollTop = consoleLog.scrollHeight;
+            
+            console.log(message);
+        }
+
+        // ===============================
+        // FORM HELPER FUNCTIONS
+        // ===============================
+        function generateRandomEmail() {
+            const randomNum = Math.floor(Math.random() * 10000);
+            const email = `test${randomNum}@example.com`;
+            document.getElementById('step3_email').value = email;
+            logToConsole(`Generated random email: ${email}`, 'info');
+        }
+
+        function generateRandomPhone() {
+            const randomPhone = Math.floor(Math.random() * 10000000).toString().padStart(7, '0');
+            const phone = `+1555${randomPhone}`;
+            document.getElementById('step3_phone').value = phone;
+            logToConsole(`Generated random phone: ${phone}`, 'info');
+        }
+
+        // ===============================
+        // TEST STEP FUNCTIONS
+        // ===============================
+        function runStep1() {
+            logToConsole('[Step 1] Checking current state...', 'info');
+            
+            const brazeLoaded = brazeDeferredLoad.isBrazeLoaded();
+            const status = brazeDeferredLoad.getStatus();
+            const queuedCount = brazeDeferredLoad.getQueue().length;
+            
+            logToConsole(`Braze Loaded: ${brazeLoaded}`, 'info');
+            logToConsole(`Status: ${JSON.stringify(status)}`, 'info');
+            logToConsole(`Queued Events: ${queuedCount}`, 'info');
+            
+            alert(`Current State:\n\n✓ Braze Loaded: ${brazeLoaded}\n✓ Identity Field: ${status.identityField || 'None'}\n✓ Queued Events: ${queuedCount}\n\nCheck console for details.`);
+            
+            brazeDeferredLoad.updateStatusPanel();
+        }
+
+        function runStep2() {
+            logToConsole('[Step 2] Clearing identifiers and sending event...', 'info');
+            
+            // Clear identifiers
+            localStorage.removeItem('ajs_user_id');
+            localStorage.removeItem('ajs_user_traits');
+            analytics.reset();
+            
+            logToConsole('Cleared all identifiers', 'info');
+            
+            // Send event
+            if (typeof analytics !== 'undefined') {
+                analytics.track('Product Viewed', {
+                    product_id: 'test-123',
+                    product_name: 'Test Product',
+                    price: 29.99
+                });
+                
+                setTimeout(function() {
+                    const queuedCount = brazeDeferredLoad.getQueue().length;
+                    logToConsole(`Event sent without identifiers. Queued: ${queuedCount}`, queuedCount > 0 ? 'success' : 'error');
+                    
+                    alert(`✓ Event sent without identifiers\n\n📦 Queued Events: ${queuedCount}\n\nThe event should be queued and NOT sent to Braze yet.`);
+                    
+                    brazeDeferredLoad.updateStatusPanel();
+                }, 500);
+            }
+        }
+
+        function runStep3() {
+            logToConsole('[Step 3] Identifying user with stated_email and stated_phone...', 'info');
+            
+            if (typeof analytics !== 'undefined') {
+                // Get values from input fields
+                const stated_email = document.getElementById('step3_email')?.value || 'jane.doe@example.com';
+                const stated_phone = document.getElementById('step3_phone')?.value || '+15551234567';
+                const firstName = document.getElementById('step3_firstName')?.value || 'Jane';
+                const lastName = document.getElementById('step3_lastName')?.value || 'Doe';
+                const company = document.getElementById('step3_company')?.value || 'Test Corp';
+                
+                const userData = {
+                    stated_email: stated_email,
+                    stated_phone: stated_phone,
+                    firstName: firstName,
+                    lastName: lastName,
+                    company: company
+                };
+                
+                logToConsole(`Calling analytics.identify with: ${JSON.stringify(userData)}`, 'info');
+                analytics.identify(userData);
+                
+                logToConsole('This should trigger Braze to load...', 'info');
+                
+                // Check state after delay
+                setTimeout(function() {
+                    const brazeLoaded = brazeDeferredLoad.isBrazeLoaded();
+                    const queuedCount = brazeDeferredLoad.getQueue().length;
+                    const status = brazeDeferredLoad.getStatus();
+                    
+                    logToConsole(`After 2s: Braze Loaded: ${brazeLoaded}, Queue: ${queuedCount}`, brazeLoaded ? 'success' : 'error');
+                    
+                    alert(`✓ User identified with stated_email & stated_phone\n\n🔥 Braze Loaded: ${brazeLoaded}\n📦 Queued Events: ${queuedCount}\n🆔 Identity Field: ${status.identityField}\n\nIf Braze loaded, queued events should have been flushed.`);
+                    
+                    brazeDeferredLoad.updateStatusPanel();
+                }, 2000);
+            }
+        }
+
+        function runStep4() {
+            logToConsole('[Step 4] Verifying Braze loaded and queue flushed...', 'info');
+            
+            const brazeSDKAvailable = typeof window.appboy !== 'undefined' || typeof window.braze !== 'undefined';
+            const brazeLoaded = brazeDeferredLoad.isBrazeLoaded();
+            const queuedCount = brazeDeferredLoad.getQueue().length;
+            const segmentAnonymousId = analytics.user().anonymousId();
+            const brazeUserId = window.appboy?.getUser()?.getBrazeId?.() || 'N/A';
+            const status = brazeDeferredLoad.getStatus();
+            
+            logToConsole(`Braze SDK Available: ${brazeSDKAvailable}`, 'info');
+            logToConsole(`Braze Middleware State: ${brazeLoaded}`, 'info');
+            logToConsole(`Remaining Queued Events: ${queuedCount}`, 'info');
+            logToConsole(`Segment anonymousId: ${segmentAnonymousId}`, 'info');
+            logToConsole(`Braze User ID: ${brazeUserId}`, 'info');
+            logToConsole(`IDs Synced: ${segmentAnonymousId === brazeUserId}`, segmentAnonymousId === brazeUserId ? 'success' : 'error');
+            
+            const successStatus = brazeLoaded && queuedCount === 0 ? '✅ SUCCESS' : '⚠️ CHECK LOGS';
+            
+            alert(`${successStatus}\n\nVerification Results:\n\n🔥 Braze SDK: ${brazeSDKAvailable ? 'Available' : 'Not Available'}\n📡 Middleware: ${brazeLoaded ? 'Loaded' : 'Not Loaded'}\n📦 Queue: ${queuedCount} events\n🆔 Segment ID: ${segmentAnonymousId}\n🔥 Braze ID: ${brazeUserId}\n✓ IDs Synced: ${segmentAnonymousId === brazeUserId}`);
+            
+            brazeDeferredLoad.updateStatusPanel();
+        }
+
+        function runStep5() {
+            logToConsole('[Step 5] Sending event after Braze loaded...', 'info');
+            
+            if (typeof analytics !== 'undefined') {
+                analytics.track('Purchase Completed', {
+                    order_id: 'ORDER-' + Date.now(),
+                    total: 149.99,
+                    currency: 'USD',
+                    items: 3
+                });
+                
+                setTimeout(function() {
+                    const queuedCount = brazeDeferredLoad.getQueue().length;
+                    const brazeLoaded = brazeDeferredLoad.isBrazeLoaded();
+                    
+                    logToConsole(`Event sent. Queue: ${queuedCount}, Braze Loaded: ${brazeLoaded}`, queuedCount === 0 ? 'success' : 'error');
+                    
+                    alert(`✓ Event sent after Braze loaded\n\n📦 Queued Events: ${queuedCount} (should be 0)\n🔥 Braze Loaded: ${brazeLoaded}\n\nEvent should have gone directly to Braze.`);
+                    
+                    brazeDeferredLoad.updateStatusPanel();
+                }, 500);
+            }
+        }
+
+        // ===============================
+        // EVENT TRIGGER FUNCTIONS
+        // ===============================
+        function triggerPageEvent() {
+            if (typeof analytics !== 'undefined') {
+                analytics.page('Testing', 'Test Page View', {
+                    test: true,
+                    timestamp: new Date().toISOString(),
+                    triggered_by: 'manual_button'
+                });
+                
+                logToConsole(`📄 Page event triggered`, 'success');
+                alert('✅ Page Event Sent!\n\nCheck Console Log for payload.');
+            } else {
+                alert('Analytics.js not loaded yet.');
+            }
+        }
+
+        function triggerTrackEvent() {
+            if (typeof analytics !== 'undefined') {
+                analytics.track('Manual Test Event', {
+                    test: true,
+                    timestamp: new Date().toISOString(),
+                    triggered_by: 'manual_button',
+                    event_number: Math.floor(Math.random() * 1000)
+                });
+                
+                logToConsole(`📊 Track event triggered`, 'success');
+                alert('✅ Track Event Sent!\n\nCheck Console Log for payload.');
+            } else {
+                alert('Analytics.js not loaded yet.');
+            }
+        }
+
+        function triggerIdentifyEvent() {
+            if (typeof analytics !== 'undefined') {
+                const includeUserId = document.getElementById('includeUserIdToggle')?.checked || false;
+                const randomNum = Math.floor(Math.random() * 10000);
+                const randomPhone = Math.floor(Math.random() * 10000000).toString().padStart(7, '0');
+                
+                const traits = {
+                    stated_email: `test${randomNum}@example.com`,
+                    stated_phone: `+1555${randomPhone}`
+                };
+                
+                logToConsole(`Generated traits: ${JSON.stringify(traits)}`, 'info');
+                
+                if (includeUserId) {
+                    const userId = "user_" + Date.now();
+                    analytics.identify(userId, traits);
+                    logToConsole(`✅ Identify called WITH userId: ${userId}`, 'success');
+                    logToConsole(`   Traits: stated_email=${traits.stated_email}, stated_phone=${traits.stated_phone}`, 'success');
+                    alert(`✅ Identify Event Sent!\n\nuserId: ${userId}\nstated_email: ${traits.stated_email}\nstated_phone: ${traits.stated_phone}\n\nCheck Console Log for full payload.`);
+                } else {
+                    analytics.identify(traits);
+                    logToConsole(`✅ Identify called WITHOUT userId (traits only)`, 'success');
+                    logToConsole(`   Traits: stated_email=${traits.stated_email}, stated_phone=${traits.stated_phone}`, 'success');
+                    alert(`✅ Identify Event Sent!\n\nstated_email: ${traits.stated_email}\nstated_phone: ${traits.stated_phone}\n\nCheck Console Log for full payload.`);
+                }
+            } else {
+                alert('Analytics.js not loaded yet.');
+            }
+        }
+
+        // ===============================
+        // RESET FUNCTION - Clear all data
+        // ===============================
+        function resetEverything() {
+            if (confirm('⚠️ This will clear ALL cookies, localStorage, and reset Segment. Continue?')) {
+                logToConsole('[RESET] Clearing all data...', 'info');
+                
+                // Reset Segment
+                if (typeof analytics !== 'undefined' && analytics.reset) {
+                    analytics.reset();
+                    logToConsole('[RESET] Segment analytics.reset() called', 'success');
+                }
+                
+                // Clear all localStorage
+                try {
+                    localStorage.clear();
+                    logToConsole('[RESET] localStorage cleared', 'success');
+                } catch (e) {
+                    logToConsole('[RESET] Error clearing localStorage: ' + e.message, 'error');
+                }
+                
+                // Clear all cookies
+                try {
+                    const cookies = document.cookie.split(';');
+                    for (let i = 0; i < cookies.length; i++) {
+                        const cookie = cookies[i];
+                        const eqPos = cookie.indexOf('=');
+                        const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim();
+                        // Clear for current path
+                        document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
+                        // Clear for root domain
+                        document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=' + window.location.hostname;
+                        // Clear for parent domain
+                        const parts = window.location.hostname.split('.');
+                        if (parts.length > 2) {
+                            const parentDomain = '.' + parts.slice(-2).join('.');
+                            document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=' + parentDomain;
+                        }
+                    }
+                    logToConsole('[RESET] All cookies cleared', 'success');
+                } catch (e) {
+                    logToConsole('[RESET] Error clearing cookies: ' + e.message, 'error');
+                }
+                
+                logToConsole('[RESET] Complete! Reloading page in 2 seconds...', 'success');
+                
+                // Reload page after 2 seconds
+                setTimeout(function() {
+                    window.location.reload();
+                }, 2000);
+            }
+        }
+
+        // ===============================
+        // INITIALIZE ON PAGE LOAD
+        // ===============================
+        document.addEventListener('DOMContentLoaded', function() {
+            const consoleLog = document.getElementById('consoleLog');
+            if (consoleLog) {
+                consoleLog.innerHTML = '';
+                logToConsole('🚀 Page loaded, initializing...', 'info');
+                logToConsole('⏳ Waiting for Analytics.js to load...', 'info');
+            }
+        });
+        
+        setTimeout(function() {
+            if (typeof analytics !== 'undefined' && analytics.user) {
+                try {
+                    const brazeLoaded = brazeDeferredLoad.isBrazeLoaded();
+                    const queuedCount = brazeDeferredLoad.getQueue().length;
+                    
+                    logToConsole('⚠️ Analytics.ready() did not fire, but Analytics.js is loaded', 'info');
+                    logToConsole(`✅ Braze Middleware State: Loaded=${brazeLoaded}, Queue=${queuedCount}`, 'success');
+                    
+                    brazeDeferredLoad.updateStatusPanel();
+                } catch (err) {
+                    logToConsole(`❌ Error: ${err.message}`, 'error');
+                }
+            } else {
+                logToConsole('❌ Analytics.js failed to load after 3 seconds', 'error');
+            }
+        }, 3000);
+        
+        analytics.ready(function() {
+            logToConsole('✅ Analytics.js loaded and ready', 'success');
+            brazeDeferredLoad.updateStatusPanel();
+        });
+
+        setInterval(updateStatus, 2000);
+    </script>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            overflow: hidden;
+        }
+
+        .content {
+            display: grid;
+            grid-template-columns: 1fr 500px;
+            gap: 0;
+            min-height: calc(100vh - 200px);
+        }
+
+        .left-column {
+            padding: 30px;
+            overflow-y: auto;
+            max-height: calc(100vh - 200px);
+            border-right: 2px solid #e0e0e0;
+        }
+
+        .right-column {
+            padding: 30px;
+            background: #f8f9fa;
+            overflow-y: auto;
+            max-height: calc(100vh - 200px);
+            position: sticky;
+            top: 0;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+            position: relative;
+        }
+
+        .reset-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-size: 0.9em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .reset-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            border-color: white;
+            transform: translateY(-2px);
+        }
+
+        .reset-btn:active {
+            transform: translateY(0);
+        }
+
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .info-box {
+            background: #e7f3ff;
+            border-left: 4px solid #2196F3;
+            padding: 20px;
+            margin-bottom: 30px;
+            border-radius: 4px;
+        }
+
+        .info-box h2 {
+            color: #1976D2;
+            margin-bottom: 10px;
+            font-size: 1.3em;
+        }
+
+        .info-box p {
+            line-height: 1.6;
+            color: #555;
+        }
+
+        .test-steps h2 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        .status-panel {
+            background: white;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .status-panel h3 {
+            margin-bottom: 15px;
+            color: #333;
+            font-size: 1.2em;
+        }
+
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px;
+            background: white;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            border: 1px solid #e0e0e0;
+        }
+
+        .status-label {
+            font-weight: 600;
+            color: #555;
+        }
+
+        .status-value {
+            font-family: 'Courier New', monospace;
+            color: #667eea;
+            word-break: break-all;
+        }
+
+        .test-steps {
+            margin-top: 30px;
+        }
+
+        .step {
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            transition: all 0.3s;
+        }
+
+        .step:hover {
+            border-color: #667eea;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+        }
+
+        .step-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .step-number {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 1.2em;
+            margin-right: 15px;
+        }
+
+        .step-title {
+            font-size: 1.3em;
+            color: #333;
+            font-weight: 600;
+        }
+
+        .step-description {
+            color: #666;
+            line-height: 1.6;
+            margin-bottom: 15px;
+        }
+
+        .code-block {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 6px;
+            overflow-x: auto;
+            margin-bottom: 15px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        .code-block pre {
+            margin: 0;
+        }
+
+        .step-note {
+            background: #fff9e6;
+            border-left: 4px solid #ffc107;
+            padding: 12px;
+            margin-top: 15px;
+            border-radius: 4px;
+            font-size: 0.95em;
+            color: #666;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .success {
+            color: #28a745;
+            font-weight: bold;
+        }
+
+        .error {
+            color: #dc3545;
+            font-weight: bold;
+        }
+
+        .console-panel {
+            background: white;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            padding: 20px;
+        }
+
+        .console-panel h3 {
+            margin-bottom: 15px;
+            color: #333;
+            font-size: 1.2em;
+        }
+
+        .console-log {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 4px;
+            max-height: 500px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85em;
+            line-height: 1.5;
+        }
+
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 5px;
+            border-radius: 3px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .log-braze {
+            color: #ff6b6b;
+            font-weight: bold;
+        }
+
+        .log-info {
+            color: #9cdcfe;
+        }
+
+        .log-success {
+            color: #4ec9b0;
+        }
+
+        .log-error {
+            color: #f48771;
+            font-weight: bold;
+        }
+
+        .log-json {
+            color: #ce9178;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            white-space: pre-wrap;
+            line-height: 1.6;
+        }
+
+        footer {
+            background: #f8f9fa;
+            padding: 20px;
+            text-align: center;
+            color: #666;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <button class="reset-btn" onclick="resetEverything()">🔄 Reset Everything</button>
+            <h1>🔥 Braze Deferred Load Middleware</h1>
+            <p class="subtitle">Test intelligent Braze SDK loading based on user identifiers</p>
+        </header>
+
+        <div class="content">
+            <!-- LEFT COLUMN: Test Steps -->
+            <div class="left-column">
+                <div class="info-box">
+                    <h2>What is this middleware?</h2>
+                    <p>
+                        The Braze Deferred Load Middleware delays loading the Braze SDK until required user identifiers 
+                        (userId, stated_email, or stated_phone) are available. Events are queued and automatically flushed 
+                        once Braze loads, ensuring proper user attribution without premature SDK initialization.
+                    </p>
+                    <p style="margin-top: 10px;">
+                        <strong>Built for:</strong> Braze Users<br>
+                        <strong>Use cases:</strong> Optimize SDK loading, prevent anonymous Braze profiles, improve attribution accuracy
+                    </p>
+                </div>
+
+                <div class="test-steps">
+                    <h2>🧪 Testing Steps</h2>
+
+                <!-- Step 1 -->
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">1</div>
+                        <div class="step-title">Check Current State</div>
+                    </div>
+                    <div class="step-description">
+                        Before starting, check if Braze is loaded and what identifiers are currently available. This establishes the baseline state.
+                    </div>
+                    <div class="code-block"><pre>// Check current state
+console.log('Braze Loaded:', brazeDeferredLoad.isBrazeLoaded());
+console.log('Status:', brazeDeferredLoad.getStatus());
+console.log('Queued Events:', brazeDeferredLoad.getQueue().length);</pre></div>
+                    <button class="btn" onclick="runStep1()">Run Step 1</button>
+                    <div class="step-note">
+                        💡 This will show whether Braze is already loaded and what identifiers exist
+                    </div>
+                </div>
+
+                <!-- Step 2 -->
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">2</div>
+                        <div class="step-title">Send Event Without Identifiers</div>
+                    </div>
+                    <div class="step-description">
+                        Send a track event when no userId, stated_email, or stated_phone exists. This event should be queued and NOT sent to Braze immediately.
+                    </div>
+                    <div class="code-block"><pre>// Clear identifiers and send event
+localStorage.removeItem('ajs_user_id');
+localStorage.removeItem('ajs_user_traits');
+analytics.reset();
+
+analytics.track('Product Viewed', {
+    product_id: 'test-123',
+    product_name: 'Test Product'
+});</pre></div>
+                    <button class="btn" onclick="runStep2()">Run Step 2</button>
+                    <div class="step-note">
+                        💡 The event should be queued, not sent to Braze. Check the queue count in the Status Panel.
+                    </div>
+                </div>
+
+                <!-- Step 3 -->
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">3</div>
+                        <div class="step-title">Identify User with stated_email & stated_phone</div>
+                    </div>
+                    <div class="step-description">
+                        Call identify() with stated_email and stated_phone. This should trigger Braze to load and flush all queued events.
+                    </div>
+                    <div style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 15px; margin-bottom: 15px;">
+                        <div style="margin-bottom: 10px;">
+                            <label style="display: block; font-weight: 600; color: #555; margin-bottom: 5px; font-size: 0.9em;">stated_email:</label>
+                            <div style="display: flex; gap: 8px;">
+                                <input type="email" id="step3_email" value="jane.doe@example.com" style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 0.9em;">
+                                <button onclick="generateRandomEmail()" style="padding: 8px 12px; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em; white-space: nowrap;">🎲 Random</button>
+                            </div>
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <label style="display: block; font-weight: 600; color: #555; margin-bottom: 5px; font-size: 0.9em;">stated_phone:</label>
+                            <div style="display: flex; gap: 8px;">
+                                <input type="tel" id="step3_phone" value="+15551234567" style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 0.9em;">
+                                <button onclick="generateRandomPhone()" style="padding: 8px 12px; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em; white-space: nowrap;">🎲 Random</button>
+                            </div>
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <label style="display: block; font-weight: 600; color: #555; margin-bottom: 5px; font-size: 0.9em;">firstName:</label>
+                            <input type="text" id="step3_firstName" value="Jane" style="width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 0.9em;">
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <label style="display: block; font-weight: 600; color: #555; margin-bottom: 5px; font-size: 0.9em;">lastName:</label>
+                            <input type="text" id="step3_lastName" value="Doe" style="width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 0.9em;">
+                        </div>
+                        <div style="margin-bottom: 0;">
+                            <label style="display: block; font-weight: 600; color: #555; margin-bottom: 5px; font-size: 0.9em;">company:</label>
+                            <input type="text" id="step3_company" value="Test Corp" style="width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 0.9em;">
+                        </div>
+                    </div>
+                    <button class="btn" onclick="runStep3()">Run Step 3</button>
+                    <div class="step-note">
+                        💡 Watch the Status Panel - Braze should load and the queue should flush to 0 within 2 seconds
+                    </div>
+                </div>
+
+                <!-- Step 4 -->
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">4</div>
+                        <div class="step-title">Verify Braze Loaded & Queue Flushed</div>
+                    </div>
+                    <div class="step-description">
+                        Confirm that Braze SDK is loaded and all queued events have been flushed. Check that anonymousId was synced with Braze ID.
+                    </div>
+                    <div class="code-block"><pre>// Verification checks
+console.log('Braze SDK:', typeof window.appboy !== 'undefined');
+console.log('Middleware State:', brazeDeferredLoad.isBrazeLoaded());
+console.log('Queue:', brazeDeferredLoad.getQueue().length);
+console.log('anonymousId:', analytics.user().anonymousId());
+console.log('Braze ID:', window.appboy?.getUser()?.getBrazeId?.());</pre></div>
+                    <button class="btn" onclick="runStep4()">Run Step 4</button>
+                    <div class="step-note">
+                        💡 All checks should pass. If not, check browser console for errors.
+                    </div>
+                </div>
+
+                <!-- Step 5 -->
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">5</div>
+                        <div class="step-title">Send Event After Braze Loaded</div>
+                    </div>
+                    <div class="step-description">
+                        Send a new event after Braze is loaded. This event should go directly to Braze without being queued.
+                    </div>
+                    <div class="code-block"><pre>analytics.track('Purchase Completed', {
+    order_id: 'ORDER-789',
+    total: 149.99,
+    currency: 'USD'
+});</pre></div>
+                    <button class="btn" onclick="runStep5()">Run Step 5</button>
+                    <div class="step-note">
+                        💡 Queue count should remain at 0 since Braze is already loaded
+                    </div>
+                    
+                    <!-- Event trigger buttons -->
+                    <div class="step-description" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e0e0e0;">
+                        <strong>Trigger Additional Events</strong><br>
+                        Send page, track, and identify events to verify they go directly to Braze.
+                    </div>
+                    <div class="btn-group">
+                        <button class="btn" onclick="triggerPageEvent()" style="background: #28a745;">📄 Page Event</button>
+                        <button class="btn" onclick="triggerTrackEvent()" style="background: #17a2b8;">📊 Track Event</button>
+                        <button class="btn" onclick="triggerIdentifyEvent()" style="background: #ffc107; color: #333;">👤 Identify Event</button>
+                    </div>
+                    <div style="margin-top: 12px; padding: 10px; background: #f8f9fa; border-radius: 4px; border: 1px solid #dee2e6;">
+                        <label style="display: flex; align-items: center; cursor: pointer; font-size: 0.95em; color: #555;">
+                            <input type="checkbox" id="includeUserIdToggle" style="margin-right: 8px; cursor: pointer;">
+                            <span>Include userId in Identify event</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <!-- End left column -->
+            </div>
+
+            <!-- RIGHT COLUMN: Results -->
+            <div class="right-column">
+                <div class="status-panel">
+                    <h3>📊 Braze Status</h3>
+                    <div class="status-item">
+                        <span class="status-label">SDK Loaded:</span>
+                        <span class="status-value" id="brazeLoaded">❌ Not Loaded</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Queued Events:</span>
+                        <span class="status-value" id="queuedEvents">0</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Identity Field Detected:</span>
+                        <span class="status-value" id="identityField">None yet</span>
+                    </div>
+                </div>
+
+                <div class="console-panel">
+                    <h3>📝 Console Log</h3>
+                    <div class="console-log" id="consoleLog">
+                        <div class="log-entry log-info">📋 Console output will appear here...</div>
+                    </div>
+                </div>
+            </div>
+            <!-- End right column -->
+        </div>
+
+        <footer>
+            <p>Braze Deferred Load Middleware Testing | Segment Analytics.js | <a href="https://segment.com/docs/connections/sources/catalog/libraries/website/javascript/middleware/" target="_blank">Documentation</a></p>
+        </footer>
+    </div>
+</body>
+</html>

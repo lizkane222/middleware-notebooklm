@@ -1,0 +1,1612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GCLID Middleware Testing</title>
+    
+    <script type="text/javascript">
+        // ===============================
+        // SEGMENT ANALYTICS SNIPPET
+        // ===============================
+        !function(){
+            var analytics=window.analytics=window.analytics||[];
+            if(!analytics.initialize)
+                if(analytics.invoked)
+                    window.console&&console.error&&console.error("Segment snippet included twice.");
+                else{
+                    analytics.invoked=!0;
+                    analytics.methods=["trackSubmit","trackClick","trackLink","trackForm","pageview","identify","reset","group","track","ready","alias","debug","page","once","off","on","addSourceMiddleware","addIntegrationMiddleware","setAnonymousId","addDestinationMiddleware"];
+                    analytics.factory=function(e){return function(){var t=Array.prototype.slice.call(arguments);t.unshift(e);analytics.push(t);return analytics}};
+                    for(var e=0;e<analytics.methods.length;e++){
+                        var key=analytics.methods[e];
+                        analytics[key]=analytics.factory(key)
+                    }
+                    analytics.load=function(key,e){
+                        var t=document.createElement("script");
+                        t.type="text/javascript";
+                        t.async=!0;
+                        t.src="https://cdn.segment.com/analytics.js/v1/" + key + "/analytics.min.js";
+                        var n=document.getElementsByTagName("script")[0];
+                        n.parentNode.insertBefore(t,n);
+                        analytics._loadOptions=e
+                    };
+                    // ********* !!!!!!!!!!!!!! *********
+                    // REPLACE WITH YOUR WRITE KEY
+                    analytics._writeKey="GHWp3Jhvn2GBHxspEdZBRVhDmJKM4XC1";
+                    analytics.SNIPPET_VERSION="4.15.3";
+                    
+                    // ********* !!!!!!!!!!!!!! *********
+                    // REPLACE WITH YOUR WRITE KEY
+                    // Load Analytics.js with your write key
+                    analytics.load("GHWp3Jhvn2GBHxspEdZBRVhDmJKM4XC1");
+                    analytics.page();
+                }
+        }();
+        
+        // ===============================
+        // EVENT LOGGER - Log all Segment events to UI console
+        // ===============================
+        // Register middleware immediately to catch all events (including those from timeout fallbacks)
+        analytics.addSourceMiddleware(function({ payload, next }) {
+            // Log event to UI console
+            setTimeout(function() {
+                if (typeof logToConsole === 'function') {
+                    const eventType = payload.obj.type;
+                    const eventName = payload.obj.event || eventType;
+                    
+                    logToConsole(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, 'info');
+                    logToConsole(`📡 ${eventType.toUpperCase()} Event: ${eventName}`, 'success');
+                    logToConsole(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, 'info');
+                    
+                    // Display full payload as formatted JSON
+                    const jsonPayload = JSON.stringify(payload.obj, null, 2);
+                    logToConsole(jsonPayload, 'json');
+                    
+                    logToConsole(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, 'info');
+                } else {
+                    // Fallback to browser console if UI not ready
+                    console.log('[EVENT LOGGER] Event captured:', payload.obj.type, payload.obj.event || '', payload.obj);
+                }
+            }, 50);
+            
+            // Continue event pipeline
+            next(payload);
+        });
+        
+        console.log('[EVENT LOGGER] Middleware registered - all events will be logged to UI console');
+        
+        // ===============================
+        // GCLID MIDDLEWARE - Set anonymousId from gclid parameter
+        // ===============================
+        // This must run immediately after analytics.load() to capture gclid before any events fire
+        console.log('[GCLID] Starting GCLID middleware...');
+        console.log('[GCLID] Current URL:', window.location.href);
+        console.log('[GCLID] Search params:', window.location.search);
+        
+        (function() {
+            function getQueryParam(param) {
+                try {
+                    const urlParams = new URLSearchParams(window.location.search);
+                    return urlParams.get(param);
+                } catch (e) {
+                    const regex = new RegExp('[?&]' + param + '=([^&#]*)');
+                    const results = regex.exec(window.location.search);
+                    return results ? decodeURIComponent(results[1].replace(/\+/g, ' ')) : null;
+                }
+            }
+            
+            // Check if an ID looks like it was previously set from a gclid
+            function looksLikeGclid(id) {
+                // GCLIDs typically start with specific patterns or contain specific characters
+                // This checks if the ID doesn't look like a standard UUID
+                if (!id) return false;
+                
+                // Standard Segment UUIDs have dashes (e.g., "39ee7ea5-b6d8-4174-b612-04e1ef3fa952")
+                // GCLIDs typically don't have dashes and are alphanumeric
+                const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+                
+                // If it's not a UUID format, it's likely a GCLID
+                return !isUUID;
+            }
+            
+            const gclid = getQueryParam('gclid');
+            console.log('[GCLID] URL parameter gclid:', gclid);
+            
+            if (gclid) {
+                // GCLID is present - set it as anonymousId
+                analytics.setAnonymousId(gclid);
+                console.log('[GCLID] Set anonymousId to:', gclid);
+                
+                // Store a flag indicating we set a GCLID
+                localStorage.setItem('ajs_gclid_set', 'true');
+                
+                // Verify after analytics is ready
+                analytics.ready(function() {
+                    const currentId = analytics.user().anonymousId();
+                    console.log('[GCLID] Verified anonymousId:', currentId);
+                    console.log('[GCLID] Match:', currentId === gclid);
+                });
+            } else {
+                // No GCLID in URL
+                console.log('[GCLID] No gclid parameter in URL');
+                
+                // Check if we previously set a GCLID
+                const gclidWasSet = localStorage.getItem('ajs_gclid_set') === 'true';
+                console.log('[GCLID] Previously set flag:', gclidWasSet);
+                
+                if (gclidWasSet) {
+                    // We previously set a GCLID, but now there's no gclid in URL
+                    // Use timeout fallback pattern since analytics.ready() may not fire
+                    
+                    let resetExecuted = false;
+                    
+                    function checkAndReset() {
+                        if (resetExecuted) return;
+                        resetExecuted = true;
+                        
+                        const currentId = analytics.user().anonymousId();
+                        console.log('[GCLID] Checking current anonymousId:', currentId);
+                        console.log('[GCLID] Does it look like a GCLID?', looksLikeGclid(currentId));
+                        
+                        // If the current ID looks like a GCLID, reset it
+                        if (looksLikeGclid(currentId)) {
+                            console.log('[GCLID] ⚠️ Current anonymousId appears to be a GCLID, regenerating...');
+                            
+                            // Clear the localStorage values FIRST
+                            localStorage.removeItem('ajs_anonymous_id');
+                            localStorage.removeItem('ajs_user_id');
+                            
+                            // Clear cookies
+                            document.cookie = 'ajs_anonymous_id=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+                            document.cookie = 'ajs_user_id=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+                            
+                            console.log('[GCLID] Cleared localStorage and cookies');
+                            
+                            // Reset to generate a new anonymousId
+                            analytics.reset();
+                            
+                            // Update flag AFTER reset
+                            localStorage.setItem('ajs_gclid_set', 'false');
+                            
+                            // Wait a moment for reset to complete
+                            setTimeout(function() {
+                                const newId = analytics.user().anonymousId();
+                                console.log('[GCLID] ✅ Regenerated new anonymousId:', newId);
+                                console.log('[GCLID] New ID looks like UUID:', !looksLikeGclid(newId));
+                                console.log('[GCLID] Flag ajs_gclid_set:', localStorage.getItem('ajs_gclid_set'));
+                            }, 100);
+                        } else {
+                            console.log('[GCLID] Current anonymousId is already a standard UUID');
+                            // Update the flag to false since we're back to normal
+                            localStorage.setItem('ajs_gclid_set', 'false');
+                            console.log('[GCLID] Updated flag ajs_gclid_set to false');
+                        }
+                    }
+                    
+                    // Try with analytics.ready() first
+                    analytics.ready(checkAndReset);
+                    
+                    // Fallback timeout if ready() doesn't fire
+                    setTimeout(function() {
+                        if (!resetExecuted) {
+                            console.log('[GCLID] ⚠️ analytics.ready() timeout, executing reset check directly...');
+                            checkAndReset();
+                        }
+                    }, 1500);
+                } else {
+                    console.log('[GCLID] Using default anonymousId generation');
+                }
+            }
+        })();
+        
+        console.log('[GCLID] GCLID middleware completed');
+        
+        // ===============================
+        // DEBUG FUNCTION - Check GCLID State
+        // ===============================
+        // Call this function from console to manually check and reset if needed
+        window.checkGclidState = function() {
+            console.log('=== GCLID State Check ===');
+            console.log('URL:', window.location.href);
+            console.log('Search params:', window.location.search);
+            
+            const urlParams = new URLSearchParams(window.location.search);
+            const gclidParam = urlParams.get('gclid');
+            console.log('GCLID in URL:', gclidParam || 'none');
+            
+            const gclidFlag = localStorage.getItem('ajs_gclid_set');
+            console.log('GCLID flag in localStorage:', gclidFlag);
+            
+            if (typeof analytics !== 'undefined' && analytics.user) {
+                const currentId = analytics.user().anonymousId();
+                console.log('Current anonymousId:', currentId);
+                
+                const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(currentId);
+                console.log('Is standard UUID format:', isUUID);
+                console.log('Looks like GCLID:', !isUUID);
+                
+                // If no gclid in URL but current ID looks like GCLID, offer to reset
+                if (!gclidParam && !isUUID) {
+                    console.warn('⚠️ No GCLID in URL but anonymousId looks like a GCLID!');
+                    console.log('Resetting anonymousId...');
+                    analytics.reset();
+                    localStorage.setItem('ajs_gclid_set', 'false');
+                    setTimeout(function() {
+                        console.log('✅ New anonymousId:', analytics.user().anonymousId());
+                    }, 100);
+                }
+            }
+            console.log('=== End State Check ===');
+        };
+    </script>
+
+    <script type="text/javascript">
+        // ===============================
+        // HELPER FUNCTIONS FOR UI
+        // ===============================
+        function logToConsole(message, type = 'info') {
+            const consoleLog = document.getElementById('consoleLog');
+            if (!consoleLog) {
+                console.error('Console log element not found!');
+                return;
+            }
+            
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            
+            // Add timestamp
+            const timestamp = new Date().toLocaleTimeString();
+            entry.textContent = `[${timestamp}] ${message}`;
+            
+            consoleLog.appendChild(entry);
+            consoleLog.scrollTop = consoleLog.scrollHeight;
+            
+            // Also log to browser console
+            console.log(message);
+        }
+
+        /**
+         * Reset Everything Function
+         * Clears all Segment state, localStorage, cookies, and reloads the page
+         */
+        function resetEverything() {
+            if (confirm('⚠️ This will clear ALL cookies, localStorage, and reset Segment. Continue?')) {
+                try {
+                    logToConsole('[RESET] Clearing all data...', 'info');
+                } catch(e) {
+                    console.log('[RESET] Clearing all data...');
+                }
+                
+                // Reset Segment Analytics
+                if (typeof analytics !== 'undefined' && analytics.reset) {
+                    analytics.reset();
+                    try {
+                        logToConsole('[RESET] Segment analytics.reset() called', 'success');
+                    } catch(e) {
+                        console.log('[RESET] Segment analytics.reset() called');
+                    }
+                }
+                
+                // Clear all localStorage
+                try {
+                    localStorage.clear();
+                    try {
+                        logToConsole('[RESET] localStorage cleared', 'success');
+                    } catch(e) {
+                        console.log('[RESET] localStorage cleared');
+                    }
+                } catch (e) {
+                    try {
+                        logToConsole('[RESET] Error clearing localStorage: ' + e.message, 'error');
+                    } catch(err) {
+                        console.log('[RESET] Error clearing localStorage: ' + e.message);
+                    }
+                }
+                
+                // Clear all cookies
+                try {
+                    const cookies = document.cookie.split(';');
+                    for (let i = 0; i < cookies.length; i++) {
+                        const cookie = cookies[i];
+                        const eqPos = cookie.indexOf('=');
+                        const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim();
+                        
+                        // Clear for current path
+                        document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
+                        
+                        // Clear for root domain
+                        document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=' + window.location.hostname;
+                        
+                        // Clear for parent domain (handles subdomains)
+                        const parts = window.location.hostname.split('.');
+                        if (parts.length > 2) {
+                            const parentDomain = '.' + parts.slice(-2).join('.');
+                            document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=' + parentDomain;
+                        }
+                    }
+                    try {
+                        logToConsole('[RESET] All cookies cleared', 'success');
+                    } catch(e) {
+                        console.log('[RESET] All cookies cleared');
+                    }
+                } catch (e) {
+                    try {
+                        logToConsole('[RESET] Error clearing cookies: ' + e.message, 'error');
+                    } catch(err) {
+                        console.log('[RESET] Error clearing cookies: ' + e.message);
+                    }
+                }
+                
+                try {
+                    logToConsole('[RESET] Complete! Reloading page NOW...', 'success');
+                } catch(e) {
+                    console.log('[RESET] Complete! Reloading page NOW...');
+                }
+                
+                // Reload page with hard refresh (bypasses cache)
+                setTimeout(function() {
+                    window.location.reload(true);
+                }, 500);
+            }
+        }
+
+        function updateStatus() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const gclidParam = urlParams.get('gclid');
+            
+            if (typeof analytics !== 'undefined' && analytics.user) {
+                const anonId = analytics.user().anonymousId();
+                const isMatch = gclidParam === anonId;
+                
+                document.getElementById('currentUrl').textContent = window.location.href;
+                document.getElementById('gclidParam').textContent = gclidParam || 'None';
+                document.getElementById('anonymousId').textContent = anonId || 'Loading...';
+                document.getElementById('matchStatus').innerHTML = gclidParam 
+                    ? (isMatch 
+                        ? '<span class="success">✅ Match: Middleware Working!</span>' 
+                        : '<span class="error">❌ No Match</span>')
+                    : 'No GCLID in URL';
+            }
+        }
+
+        // ===============================
+        // TEST STEP FUNCTIONS
+        // ===============================
+        function runStep1() {
+            logToConsole('[Step 1] Button clicked, checking Analytics...', 'info');
+            console.log('[Step 1] typeof analytics:', typeof analytics);
+            
+            if (typeof analytics !== 'undefined' && analytics.user) {
+                logToConsole('[Step 1] Analytics object found, waiting for ready...', 'info');
+                
+                let readyFired = false;
+                
+                // Timeout fallback
+                setTimeout(function() {
+                    if (!readyFired) {
+                        logToConsole('[Step 1] Timeout - calling directly without ready()', 'info');
+                        try {
+                            const anonId = analytics.user().anonymousId();
+                            const currentUrl = window.location.href;
+                            
+                            logToConsole(`[Step 1] Current anonymousId: ${anonId}`, 'gclid');
+                            logToConsole(`[Step 1] Current URL: ${currentUrl}`, 'info');
+                            
+                            alert(`Current Anonymous ID:\n${anonId}\n\nCurrent URL:\n${currentUrl}\n\n✓ Ready to test GCLID middleware`);
+                        } catch (err) {
+                            logToConsole(`[Step 1] Error: ${err.message}`, 'error');
+                        }
+                    }
+                }, 1000);
+                
+                analytics.ready(function() {
+                    readyFired = true;
+                    logToConsole('[Step 1] Analytics ready callback fired', 'success');
+                    
+                    const anonId = analytics.user().anonymousId();
+                    const currentUrl = window.location.href;
+                    
+                    logToConsole(`[Step 1] Current anonymousId: ${anonId}`, 'gclid');
+                    logToConsole(`[Step 1] Current URL: ${currentUrl}`, 'info');
+                    
+                    alert(`Current Anonymous ID:\n${anonId}\n\nCurrent URL:\n${currentUrl}\n\n✓ Ready to test GCLID middleware`);
+                });
+            } else {
+                logToConsole('[Step 1] ERROR: Analytics not loaded', 'error');
+                alert('Analytics.js not loaded yet. Please wait a moment and try again.');
+            }
+        }
+
+        function runStep2() {
+            const testGclid = 'gclid_test_' + Date.now();
+            const newUrl = window.location.pathname + '?gclid=' + testGclid;
+            
+            logToConsole(`[Step 2] Adding GCLID to URL: ${testGclid}`, 'gclid');
+            
+            if (confirm(`This will reload the page with gclid parameter:\n${testGclid}\n\nContinue?`)) {
+                window.location.href = newUrl;
+            }
+        }
+
+        function runStep3() {
+            logToConsole('[Step 3] Button clicked, verifying GCLID capture...', 'info');
+            
+            if (typeof analytics !== 'undefined' && analytics.user) {
+                let readyFired = false;
+                
+                // Timeout fallback
+                setTimeout(function() {
+                    if (!readyFired) {
+                        logToConsole('[Step 3] Timeout - checking directly without ready()', 'info');
+                        try {
+                            const urlParams = new URLSearchParams(window.location.search);
+                            const gclidParam = urlParams.get('gclid');
+                            const currentAnonId = analytics.user().anonymousId();
+                            const isMatch = gclidParam === currentAnonId;
+                            
+                            logToConsole(`[Step 3] GCLID from URL: ${gclidParam || 'none'}`, 'gclid');
+                            logToConsole(`[Step 3] Current anonymousId: ${currentAnonId}`, 'info');
+                            logToConsole(`[Step 3] Match: ${isMatch}`, isMatch ? 'success' : 'error');
+                            
+                            alert(`GCLID Verification:\n\n📍 GCLID from URL: ${gclidParam || 'none'}\n🆔 Current anonymousId: ${currentAnonId}\n${isMatch ? '✅ Match - GCLID middleware working!' : '❌ No match - Check console logs'}`);
+                            
+                            updateStatus();
+                        } catch (err) {
+                            logToConsole(`[Step 3] Error: ${err.message}`, 'error');
+                        }
+                    }
+                }, 1000);
+                
+                analytics.ready(function() {
+                    readyFired = true;
+                    logToConsole('[Step 3] Analytics ready callback fired', 'success');
+                    
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const gclidParam = urlParams.get('gclid');
+                    const currentAnonId = analytics.user().anonymousId();
+                    const isMatch = gclidParam === currentAnonId;
+                    
+                    logToConsole(`[Step 3] GCLID from URL: ${gclidParam || 'none'}`, 'gclid');
+                    logToConsole(`[Step 3] Current anonymousId: ${currentAnonId}`, 'info');
+                    logToConsole(`[Step 3] Match: ${isMatch}`, isMatch ? 'success' : 'error');
+                    
+                    alert(`GCLID Verification:\n\n📍 GCLID from URL: ${gclidParam || 'none'}\n🆔 Current anonymousId: ${currentAnonId}\n${isMatch ? '✅ Match - GCLID middleware working!' : '❌ No match - Check console logs'}`);
+                    
+                    updateStatus();
+                });
+            } else {
+                logToConsole('[Step 3] ERROR: Analytics not loaded', 'error');
+                alert('Analytics.js not loaded yet. Please wait a moment and try again.');
+            }
+        }
+
+        function runStep4() {
+            if (typeof analytics !== 'undefined' && analytics.user) {
+                // Set a timeout in case ready() never fires
+                let readyFired = false;
+                
+                setTimeout(function() {
+                    if (!readyFired) {
+                        console.warn('[Step 4] analytics.ready() did not fire after 2 seconds, calling track directly...');
+                        logToConsole(`[Step 4] Calling track directly...`, 'info');
+                        
+                        try {
+                            const gclidParam = new URLSearchParams(window.location.search).get('gclid');
+                            const anonId = analytics.user().anonymousId();
+                            
+                            analytics.track('Test Event with GCLID', {
+                                test: true,
+                                gclid: gclidParam,
+                                anonymousId: anonId,
+                                timestamp: new Date().toISOString()
+                            });
+                            
+                            logToConsole(`[Step 4] ✅ Track event sent (direct call)`, 'success');
+                        } catch (err) {
+                            console.error('[Step 4] Direct track call failed:', err);
+                        }
+                    }
+                }, 2000);
+                
+                analytics.ready(function() {
+                    readyFired = true;
+                    
+                    const gclidParam = new URLSearchParams(window.location.search).get('gclid');
+                    const anonId = analytics.user().anonymousId();
+                    
+                    logToConsole(`[Step 4] Sending track event...`, 'info');
+                    logToConsole(`[Step 4] Event: "Test Event with GCLID"`, 'info');
+                    logToConsole(`[Step 4] GCLID: ${gclidParam}`, 'gclid');
+                    logToConsole(`[Step 4] anonymousId: ${anonId}`, 'info');
+                    
+                    analytics.track('Test Event with GCLID', {
+                        test: true,
+                        gclid: gclidParam,
+                        anonymousId: anonId,
+                        timestamp: new Date().toISOString()
+                    });
+                    
+                    logToConsole(`[Step 4] ✅ Track event sent successfully`, 'success');
+                    
+                    alert(`✓ Track event sent!\n\nEvent: "Test Event with GCLID"\nGCLID: ${gclidParam}\nanonymousId: ${anonId}\n\n📡 Check Network tab for the track request to api.segment.io`);
+                    
+                    updateStatus();
+                });
+            } else {
+                alert('Analytics.js not loaded yet. Please wait a moment and try again.');
+            }
+        }
+
+        function runStep5() {
+            if (typeof analytics !== 'undefined' && analytics.user) {
+                let readyFired = false;
+                
+                // Timeout fallback
+                setTimeout(function() {
+                    if (!readyFired) {
+                        logToConsole('[Step 5] Timeout - checking directly without ready()', 'info');
+                        try {
+                            const anonId = analytics.user().anonymousId();
+                            const localStorageId = localStorage.getItem('ajs_anonymous_id');
+                            const cookieMatch = document.cookie.includes(anonId);
+                            const gclidParam = new URLSearchParams(window.location.search).get('gclid');
+                            
+                            logToConsole(`[Step 5] Current anonymousId: ${anonId}`, 'info');
+                            logToConsole(`[Step 5] LocalStorage: ${localStorageId}`, 'info');
+                            logToConsole(`[Step 5] In Cookies: ${cookieMatch}`, 'info');
+                            logToConsole(`[Step 5] GCLID in URL: ${gclidParam || 'none'}`, 'gclid');
+                            
+                            alert(`GCLID Persistence Check:\n\n🆔 Current anonymousId:\n${anonId}\n\n💾 LocalStorage:\n${localStorageId}\n\n🍪 In Cookies: ${cookieMatch ? 'Yes' : 'No'}\n\n📍 GCLID in URL: ${gclidParam || 'none'}`);
+                        } catch (err) {
+                            logToConsole(`[Step 5] Error: ${err.message}`, 'error');
+                        }
+                    }
+                }, 1000);
+                
+                analytics.ready(function() {
+                    readyFired = true;
+                    logToConsole('[Step 5] Analytics ready callback fired', 'success');
+                    
+                    const anonId = analytics.user().anonymousId();
+                    const localStorageId = localStorage.getItem('ajs_anonymous_id');
+                    const cookieMatch = document.cookie.includes(anonId);
+                    const gclidParam = new URLSearchParams(window.location.search).get('gclid');
+                    
+                    logToConsole(`[Step 5] Current anonymousId: ${anonId}`, 'info');
+                    logToConsole(`[Step 5] LocalStorage: ${localStorageId}`, 'info');
+                    logToConsole(`[Step 5] In Cookies: ${cookieMatch}`, 'info');
+                    logToConsole(`[Step 5] GCLID in URL: ${gclidParam || 'none'}`, 'gclid');
+                    
+                    alert(`GCLID Persistence Check:\n\n🆔 Current anonymousId:\n${anonId}\n\n💾 LocalStorage:\n${localStorageId}\n\n🍪 In Cookies: ${cookieMatch ? 'Yes' : 'No'}\n\n📍 GCLID in URL: ${gclidParam || 'none'}`);
+                });
+            } else {
+                alert('Analytics.js not loaded yet. Please wait a moment and try again.');
+            }
+        }
+
+        function runStep6() {
+            console.log('=== STEP 6 START ===');
+            const currentUrl = window.location.href;
+            const currentId = analytics.user().anonymousId();
+            const gclidFlag = localStorage.getItem('ajs_gclid_set');
+            
+            console.log('[Step 6] Current URL:', currentUrl);
+            console.log('[Step 6] Current anonymousId:', currentId);
+            console.log('[Step 6] GCLID flag in localStorage:', gclidFlag);
+            console.log('[Step 6] localStorage ajs_anonymous_id:', localStorage.getItem('ajs_anonymous_id'));
+            
+            logToConsole('[Step 6] Removing GCLID from URL...', 'info');
+            logToConsole(`[Step 6] Current anonymousId: ${currentId}`, 'info');
+            logToConsole(`[Step 6] GCLID flag: ${gclidFlag}`, 'info');
+            
+            if (confirm('This will reload the page WITHOUT gclid parameter.\n\nThe anonymousId should be automatically regenerated by the middleware.\n\nContinue?')) {
+                console.log('[Step 6] User confirmed, reloading without gclid...');
+                console.log('[Step 6] After reload, check console for [GCLID] middleware logs');
+                window.location.href = window.location.pathname;
+            } else {
+                console.log('[Step 6] User cancelled');
+            }
+        }
+
+        function runStep6b() {
+            logToConsole('[Step 6b] Manually checking GCLID state...', 'info');
+            
+            if (typeof analytics !== 'undefined' && analytics.user) {
+                let readyFired = false;
+                
+                function checkAndProcess() {
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const gclidParam = urlParams.get('gclid');
+                    const currentId = analytics.user().anonymousId();
+                    const gclidFlag = localStorage.getItem('ajs_gclid_set');
+                    
+                    // Check if ID looks like GCLID
+                    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(currentId);
+                    const looksLikeGclid = !isUUID;
+                    
+                    logToConsole(`[Step 6b] GCLID in URL: ${gclidParam || 'none'}`, 'info');
+                    logToConsole(`[Step 6b] Current anonymousId: ${currentId}`, 'info');
+                    logToConsole(`[Step 6b] Is standard UUID: ${isUUID}`, 'info');
+                    logToConsole(`[Step 6b] Looks like GCLID: ${looksLikeGclid}`, looksLikeGclid ? 'error' : 'success');
+                    logToConsole(`[Step 6b] GCLID flag in localStorage: ${gclidFlag}`, 'info');
+                    
+                    // If no gclid in URL but current ID looks like GCLID, reset it
+                    if (!gclidParam && looksLikeGclid) {
+                        logToConsole('[Step 6b] ⚠️ ISSUE DETECTED: No GCLID in URL but anonymousId looks like a GCLID!', 'error');
+                        logToConsole('[Step 6b] Forcing reset...', 'info');
+                        
+                        analytics.reset();
+                        localStorage.setItem('ajs_gclid_set', 'false');
+                        
+                        setTimeout(function() {
+                            const newId = analytics.user().anonymousId();
+                            logToConsole(`[Step 6b] ✅ Reset complete! New anonymousId: ${newId}`, 'success');
+                            updateStatus();
+                            
+                            alert(`✅ Manual Reset Complete!\n\n🔄 Old anonymousId (GCLID): ${currentId}\n\n✨ New anonymousId (UUID): ${newId}\n\n💾 Set localStorage flag to false\n\nThe middleware should now work correctly.`);
+                        }, 200);
+                    } else if (gclidParam) {
+                        alert(`ℹ️ GCLID is in URL\n\n📍 GCLID: ${gclidParam}\n🆔 anonymousId: ${currentId}\n\n${gclidParam === currentId ? '✅ Match - Working correctly!' : '❌ Mismatch - May need page reload'}`);
+                    } else {
+                        alert(`✅ Everything looks good!\n\n🆔 Current anonymousId: ${currentId}\n📍 GCLID in URL: none\n🔍 ID format: ${isUUID ? 'Standard UUID' : 'Non-standard'}\n\nNo action needed.`);
+                    }
+                }
+                
+                // Timeout fallback
+                setTimeout(function() {
+                    if (!readyFired) {
+                        logToConsole('[Step 6b] Timeout - checking directly without ready()', 'info');
+                        try {
+                            checkAndProcess();
+                        } catch (err) {
+                            logToConsole(`[Step 6b] Error: ${err.message}`, 'error');
+                        }
+                    }
+                }, 1000);
+                
+                // Try with analytics.ready()
+                analytics.ready(function() {
+                    readyFired = true;
+                    logToConsole('[Step 6b] Analytics ready callback fired', 'success');
+                    checkAndProcess();
+                });
+            } else {
+                alert('Analytics.js not loaded yet. Please wait a moment and try again.');
+            }
+        }
+
+        // ===============================
+        // EVENT TRIGGER FUNCTIONS
+        // ===============================
+        function triggerPageEvent() {
+            if (typeof analytics !== 'undefined') {
+                const pageName = 'Test Page View';
+                const pageCategory = 'Testing';
+                
+                analytics.page(pageCategory, pageName, {
+                    test: true,
+                    timestamp: new Date().toISOString(),
+                    triggered_by: 'manual_button'
+                });
+                
+                logToConsole(`📄 Page event triggered: ${pageCategory} - ${pageName}`, 'success');
+                alert(`✅ Page Event Sent!\n\nCategory: ${pageCategory}\nName: ${pageName}\n\nCheck the Console Log for the full payload.`);
+            } else {
+                alert('Analytics.js not loaded yet. Please wait and try again.');
+            }
+        }
+
+        function triggerTrackEvent() {
+            if (typeof analytics !== 'undefined') {
+                const eventName = 'Manual Test Event';
+                
+                analytics.track(eventName, {
+                    test: true,
+                    timestamp: new Date().toISOString(),
+                    triggered_by: 'manual_button',
+                    event_number: Math.floor(Math.random() * 1000)
+                });
+                
+                logToConsole(`📊 Track event triggered: ${eventName}`, 'success');
+                alert(`✅ Track Event Sent!\n\nEvent: ${eventName}\n\nCheck the Console Log for the full payload.`);
+            } else {
+                alert('Analytics.js not loaded yet. Please wait and try again.');
+            }
+        }
+
+        function triggerIdentifyEvent() {
+            if (typeof analytics !== 'undefined') {
+                const userId = 'test_user_' + Date.now();
+                
+                analytics.identify(userId, {
+                    name: 'Test User',
+                    email: 'test@example.com',
+                    test: true,
+                    timestamp: new Date().toISOString()
+                });
+                
+                logToConsole(`👤 Identify event triggered for userId: ${userId}`, 'success');
+                alert(`✅ Identify Event Sent!\n\nUser ID: ${userId}\nName: Test User\nEmail: test@example.com\n\nCheck the Console Log for the full payload.`);
+            } else {
+                alert('Analytics.js not loaded yet. Please wait and try again.');
+            }
+        }
+
+        // ===============================
+        // INITIALIZE ON PAGE LOAD
+        // ===============================
+        // Clear initial placeholder and start logging
+        document.addEventListener('DOMContentLoaded', function() {
+            const consoleLog = document.getElementById('consoleLog');
+            if (consoleLog) {
+                consoleLog.innerHTML = ''; // Clear placeholder
+                logToConsole('🚀 Page loaded, initializing...', 'info');
+                logToConsole('⏳ Waiting for Analytics.js to load...', 'info');
+            }
+        });
+        
+        // Add a timeout to check if analytics.ready never fires
+        setTimeout(function() {
+            if (typeof analytics !== 'undefined' && analytics.user) {
+                try {
+                    const anonId = analytics.user().anonymousId();
+                    const gclidParam = new URLSearchParams(window.location.search).get('gclid');
+                    const gclidFlag = localStorage.getItem('ajs_gclid_set');
+                    
+                    logToConsole('⚠️ Analytics.ready() did not fire, but Analytics.js is loaded', 'info');
+                    logToConsole(`✅ Current anonymousId: ${anonId}`, 'success');
+                    
+                    // Check if this is a UUID or GCLID format
+                    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(anonId);
+                    
+                    // Log middleware status
+                    if (gclidParam) {
+                        logToConsole(`🎯 GCLID detected in URL: ${gclidParam}`, 'gclid');
+                        logToConsole('✅ Middleware should have set this as anonymousId', 'success');
+                    } else if (gclidFlag === 'true' && !isUUID) {
+                        logToConsole('⚠️ No GCLID in URL but anonymousId looks like GCLID', 'error');
+                        logToConsole(`📋 ajs_gclid_set flag: ${gclidFlag}`, 'info');
+                        logToConsole('🔄 Middleware should automatically reset this...', 'info');
+                    } else if (gclidFlag === 'false' && isUUID) {
+                        logToConsole('✅ GCLID was reset successfully - now using UUID', 'success');
+                        logToConsole(`📋 ajs_gclid_set flag: ${gclidFlag}`, 'info');
+                    } else {
+                        logToConsole('ℹ️ No GCLID in URL - using default anonymousId', 'info');
+                        logToConsole(`📋 ID format: ${isUUID ? 'UUID' : 'Non-standard'}`, 'info');
+                    }
+                    
+                    updateStatus();
+                } catch (err) {
+                    logToConsole(`❌ Error accessing Analytics: ${err.message}`, 'error');
+                }
+            } else {
+                logToConsole('❌ Analytics.js failed to load after 3 seconds', 'error');
+            }
+        }, 3000);
+        
+        analytics.ready(function() {
+            const anonId = analytics.user().anonymousId();
+            const gclidParam = new URLSearchParams(window.location.search).get('gclid');
+            const gclidFlag = localStorage.getItem('ajs_gclid_set');
+            
+            logToConsole('✅ Analytics.js loaded and ready', 'success');
+            logToConsole(`✅ Current anonymousId: ${anonId}`, 'success');
+            
+            // Check if this is a UUID or GCLID format
+            const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(anonId);
+            
+            // Log middleware status
+            if (gclidParam) {
+                logToConsole(`🎯 GCLID detected in URL: ${gclidParam}`, 'gclid');
+                logToConsole('✅ Middleware should have set this as anonymousId', 'success');
+            } else if (gclidFlag === 'true' && !isUUID) {
+                logToConsole('⚠️ No GCLID in URL but anonymousId looks like GCLID', 'error');
+                logToConsole(`📋 ajs_gclid_set flag: ${gclidFlag}`, 'info');
+                logToConsole('🔄 Middleware should automatically reset this...', 'info');
+            } else if (gclidFlag === 'false' && isUUID) {
+                logToConsole('✅ GCLID was reset successfully - now using UUID', 'success');
+                logToConsole(`📋 ajs_gclid_set flag: ${gclidFlag}`, 'info');
+            } else {
+                logToConsole('ℹ️ No GCLID in URL - using default anonymousId', 'info');
+                logToConsole(`📋 ID format: ${isUUID ? 'UUID' : 'Non-standard'}`, 'info');
+            }
+            
+            updateStatus();
+        });
+
+        // Update status every 2 seconds
+        setInterval(updateStatus, 2000);
+    </script>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1700px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            overflow: hidden;
+        }
+
+        .content {
+            display: grid;
+            grid-template-columns: 1fr 500px;
+            gap: 0;
+            min-height: calc(100vh - 200px);
+        }
+
+        .left-column {
+            padding: 30px;
+            overflow-y: auto;
+            max-height: calc(100vh - 200px);
+            border-right: 2px solid #e0e0e0;
+        }
+
+        .right-column {
+            padding: 15px;
+            background: #f8f9fa;
+            overflow-y: auto;
+            max-height: calc(100vh - 200px);
+            position: sticky;
+            top: 0;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+            position: relative;
+        }
+
+        /* Reset Button Styles */
+        .reset-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-size: 0.9em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .reset-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            border-color: white;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .reset-btn:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .info-box {
+            background: #e7f3ff;
+            border-left: 4px solid #2196F3;
+            padding: 20px;
+            margin-bottom: 30px;
+            border-radius: 4px;
+        }
+
+        .info-box h2 {
+            color: #1976D2;
+            margin-bottom: 10px;
+            font-size: 1.3em;
+        }
+
+        .info-box p {
+            line-height: 1.6;
+            color: #555;
+        }
+
+        .test-steps h2 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        .status-panel {
+            background: white;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            /*padding: 10px;*/
+            padding: 2%;
+            margin-bottom: 10px;
+            max-height: 30%;
+        }
+
+        .status-panel h3 {
+            margin-bottom: 10px;
+            color: #333;
+            font-size: 1em;
+        }
+
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px;
+            background: white;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            border: 1px solid #e0e0e0;
+        }
+
+        .status-label {
+            font-size: .8em;
+            font-weight: 600;
+            color: #555;
+        }
+
+        .status-value {
+            font-size: .7em;
+            font-family: 'Courier New', monospace;
+            color: #667eea;
+            word-break: break-all;
+        }
+
+        .test-steps {
+            margin-top: 30px;
+        }
+
+        .step {
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            transition: all 0.3s;
+        }
+
+        .step:hover {
+            border-color: #667eea;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+        }
+
+        .step-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .step-number {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 1.2em;
+            margin-right: 15px;
+        }
+
+        .step-title {
+            font-size: 1.3em;
+            color: #333;
+            font-weight: 600;
+        }
+
+        .step-description {
+            color: #666;
+            line-height: 1.6;
+            margin-bottom: 15px;
+        }
+
+        .code-block {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 6px;
+            overflow-x: auto;
+            margin-bottom: 15px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        .code-block pre {
+            margin: 0;
+        }
+
+        .step-note {
+            background: #fff9e6;
+            border-left: 4px solid #ffc107;
+            padding: 12px;
+            margin-top: 15px;
+            border-radius: 4px;
+            font-size: 0.95em;
+            color: #666;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            box-shadow: 0 2px 8px rgba(108, 117, 125, 0.3);
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .success {
+            color: #28a745;
+            font-weight: bold;
+        }
+
+        .error {
+            color: #dc3545;
+            font-weight: bold;
+        }
+
+        .console-panel {
+            background: white;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            /*padding: 10px;*/
+            padding: 2%;
+            height: 73%;
+        }
+
+        .console-panel h3 {
+            margin-bottom: 5px;
+            color: #333;
+            font-size: 1em;
+        }
+
+        .console-log {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 4px;
+            /*max-height: 675px;*/
+            height: 95%;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85em;
+            line-height: 1.5;
+        }
+
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 5px;
+            border-radius: 3px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .log-gclid {
+            color: #4ec9b0;
+            font-weight: bold;
+        }
+
+        .log-info {
+            color: #9cdcfe;
+        }
+
+        .log-success {
+            color: #4ec9b0;
+        }
+
+        .log-error {
+            color: #f48771;
+            font-weight: bold;
+        }
+
+        .log-json {
+            color: #ce9178;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            white-space: pre-wrap;
+            line-height: 1.6;
+        }
+
+        footer {
+            background: #f8f9fa;
+            padding: 5px;
+            text-align: center;
+            color: #666;
+            font-size: 0.75em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <button class="reset-btn" onclick="resetEverything()">🔄 RESET CLIENT</button>
+            <h1>🎯 GCLID Attribution Middleware</h1>
+            <p class="subtitle">Test Google Click ID capture and Segment anonymousId assignment</p>
+        </header>
+
+        <div class="content">
+            <!-- LEFT COLUMN: Test Steps -->
+            <div class="left-column">
+                <div class="info-box">
+                    <h2>What is this middleware?</h2>
+                    <p>
+                        The GCLID Attribution Middleware captures the Google Click ID (gclid) from URL query parameters 
+                        and sets it as the Segment anonymousId. This ensures that if a link with gclid is shared within BigCommerce employees, that the events are only ever attributed to that user's gclid and not the employee's anonymousId.
+                    </p>
+                    <p style="margin-top: 10px;">
+                        <strong>Built for:</strong> CustomerName<br>
+                        <strong>Use cases:</strong> Link sharing within CustomerName's employees that doesn't result in Unify merges for that gclid and the employee's anonymousId.
+                    </p>
+                </div>
+
+                <div class="test-steps">
+                    <h2>🧪 Testing Steps</h2>
+
+                <!-- Step 1 -->
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">1</div>
+                        <div class="step-title">Check Current Anonymous ID</div>
+                    </div>
+                    <div class="step-description">
+                        Open the browser console and check your current anonymousId. This will help you verify the change after adding gclid to the URL.
+                    </div>
+                    <div class="code-block"><pre><span style="color: #6A9955;">// Check current anonymousId</span>
+<span style="color: #DCDCAA;">console</span>.<span style="color: #DCDCAA;">log</span>(<span style="color: #CE9178;">'Current anonymousId:'</span>, <span style="color: #9CDCFE;">analytics</span>.<span style="color: #DCDCAA;">user</span>().<span style="color: #DCDCAA;">anonymousId</span>());
+<span style="color: #DCDCAA;">console</span>.<span style="color: #DCDCAA;">log</span>(<span style="color: #CE9178;">'Current URL:'</span>, <span style="color: #9CDCFE;">window</span>.<span style="color: #9CDCFE;">location</span>.<span style="color: #9CDCFE;">href</span>);</pre></div>
+                    <button class="btn" onclick="runStep1()">Run Step 1</button>
+                    <div class="step-note">
+                        💡 Note the current anonymousId before adding gclid parameter
+                    </div>
+                </div>
+
+                <!-- Step 2 -->
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">2</div>
+                        <div class="step-title">Add GCLID to URL</div>
+                    </div>
+                    <div class="step-description">
+                        Manually add a gclid parameter to your URL. This simulates a user clicking a Google Ads link. Example: ?gclid=test123456789
+                    </div>
+                    <div class="code-block"><pre><span style="color: #6A9955;">// Simulate adding gclid to URL</span>
+<span style="color: #C586C0;">const</span> <span style="color: #9CDCFE;">testGclid</span> = <span style="color: #CE9178;">'gclid_test_'</span> + <span style="color: #4EC9B0;">Date</span>.<span style="color: #DCDCAA;">now</span>();
+<span style="color: #9CDCFE;">window</span>.<span style="color: #9CDCFE;">location</span>.<span style="color: #9CDCFE;">href</span> = <span style="color: #9CDCFE;">window</span>.<span style="color: #9CDCFE;">location</span>.<span style="color: #9CDCFE;">pathname</span> + <span style="color: #CE9178;">'?gclid='</span> + <span style="color: #9CDCFE;">testGclid</span>;</pre></div>
+                    <button class="btn" onclick="runStep2()">Run Step 2 - Add GCLID</button>
+                    <div class="step-note">
+                        💡 The page will reload with the gclid parameter in the URL
+                    </div>
+                </div>
+
+                <!-- Step 3 -->
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">3</div>
+                        <div class="step-title">Verify GCLID was Captured</div>
+                    </div>
+                    <div class="step-description">
+                        After reloading with gclid in the URL, check the console for "[GCLID]" log messages. The middleware should have captured and set the gclid as anonymousId.
+                    </div>
+                    <div class="code-block"><pre><span style="color: #6A9955;">// Check if gclid was captured</span>
+<span style="color: #C586C0;">const</span> <span style="color: #9CDCFE;">urlParams</span> = <span style="color: #C586C0;">new</span> <span style="color: #4EC9B0;">URLSearchParams</span>(<span style="color: #9CDCFE;">window</span>.<span style="color: #9CDCFE;">location</span>.<span style="color: #9CDCFE;">search</span>);
+<span style="color: #C586C0;">const</span> <span style="color: #9CDCFE;">gclidParam</span> = <span style="color: #9CDCFE;">urlParams</span>.<span style="color: #DCDCAA;">get</span>(<span style="color: #CE9178;">'gclid'</span>);
+<span style="color: #C586C0;">const</span> <span style="color: #9CDCFE;">currentAnonId</span> = <span style="color: #9CDCFE;">analytics</span>.<span style="color: #DCDCAA;">user</span>().<span style="color: #DCDCAA;">anonymousId</span>();
+
+<span style="color: #DCDCAA;">console</span>.<span style="color: #DCDCAA;">log</span>(<span style="color: #CE9178;">'GCLID from URL:'</span>, <span style="color: #9CDCFE;">gclidParam</span>);
+<span style="color: #DCDCAA;">console</span>.<span style="color: #DCDCAA;">log</span>(<span style="color: #CE9178;">'Current anonymousId:'</span>, <span style="color: #9CDCFE;">currentAnonId</span>);
+<span style="color: #DCDCAA;">console</span>.<span style="color: #DCDCAA;">log</span>(<span style="color: #CE9178;">'Match:'</span>, <span style="color: #9CDCFE;">gclidParam</span> === <span style="color: #9CDCFE;">currentAnonId</span>);</pre></div>
+                    <button class="btn" onclick="runStep3()">Run Step 3 - Verify</button>
+                    <div class="step-note">
+                        💡 The anonymousId should now match the gclid parameter
+                    </div>
+                </div>
+
+                <!-- Step 4 -->
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">4</div>
+                        <div class="step-title">Send Test Track Event</div>
+                    </div>
+                    <div class="step-description">
+                        Fire a test track event to verify the gclid is being sent with all events to destinations. Check Network tab for the track call.
+                    </div>
+                    <div class="code-block"><pre><span style="color: #6A9955;">// Send track event with gclid as anonymousId</span>
+<span style="color: #9CDCFE;">analytics</span>.<span style="color: #DCDCAA;">track</span>(<span style="color: #CE9178;">'Test Event with GCLID'</span>, {
+    <span style="color: #9CDCFE;">test</span>: <span style="color: #569CD6;">true</span>,
+    <span style="color: #9CDCFE;">timestamp</span>: <span style="color: #C586C0;">new</span> <span style="color: #4EC9B0;">Date</span>().<span style="color: #DCDCAA;">toISOString</span>()
+});</pre></div>
+                    <button class="btn" onclick="runStep4()">Run Step 4 - Send Event</button>
+                    <div class="step-note">
+                        💡 The track call should include the gclid as the anonymousId in the payload
+                    </div>
+                </div>
+
+                <!-- Step 5 (was Step 6) -->
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">5</div>
+                        <div class="step-title">Test GCLID Persistence</div>
+                    </div>
+                    <div class="step-description">
+                        After setting gclid as anonymousId, verify it persists in cookies/localStorage. Trigger additional events to confirm the gclid continues to be used as the anonymousId.
+                    </div>
+                    <div class="code-block"><pre><span style="color: #6A9955;">// Check GCLID persistence in storage</span>
+<span style="color: #C586C0;">const</span> <span style="color: #9CDCFE;">anonId</span> = <span style="color: #9CDCFE;">analytics</span>.<span style="color: #DCDCAA;">user</span>().<span style="color: #DCDCAA;">anonymousId</span>();
+<span style="color: #C586C0;">const</span> <span style="color: #9CDCFE;">localStorageId</span> = <span style="color: #9CDCFE;">localStorage</span>.<span style="color: #DCDCAA;">getItem</span>(<span style="color: #CE9178;">'ajs_anonymous_id'</span>);
+<span style="color: #C586C0;">const</span> <span style="color: #9CDCFE;">cookieMatch</span> = <span style="color: #9CDCFE;">document</span>.<span style="color: #9CDCFE;">cookie</span>.<span style="color: #DCDCAA;">includes</span>(<span style="color: #9CDCFE;">anonId</span>);
+
+<span style="color: #DCDCAA;">console</span>.<span style="color: #DCDCAA;">log</span>(<span style="color: #CE9178;">'Current anonymousId:'</span>, <span style="color: #9CDCFE;">anonId</span>);
+<span style="color: #DCDCAA;">console</span>.<span style="color: #DCDCAA;">log</span>(<span style="color: #CE9178;">'LocalStorage ajs_anonymous_id:'</span>, <span style="color: #9CDCFE;">localStorageId</span>);
+<span style="color: #DCDCAA;">console</span>.<span style="color: #DCDCAA;">log</span>(<span style="color: #CE9178;">'Found in cookies:'</span>, <span style="color: #9CDCFE;">cookieMatch</span>);</pre></div>
+                    <button class="btn" onclick="runStep5()">Run Step 5 - Check Persistence</button>
+                    <div class="step-note">
+                        💡 GCLID should be stored and persist across page views and sessions
+                    </div>
+                    
+                    <!-- Event trigger buttons -->
+                    <div class="step-description" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e0e0e0;">
+                        <strong>Trigger Additional Events (with GCLID)</strong><br>
+                        Send page, track, and identify events to verify the GCLID is included in all event payloads.
+                    </div>
+                    <div class="btn-group">
+                        <button class="btn" onclick="triggerPageEvent()" style="background: #28a745;">📄 Page Event</button>
+                        <button class="btn" onclick="triggerTrackEvent()" style="background: #17a2b8;">📊 Track Event</button>
+                        <button class="btn" onclick="triggerIdentifyEvent()" style="background: #ffc107; color: #333;">👤 Identify Event</button>
+                    </div>
+                </div>
+
+                <!-- Step 6 (was Step 5) -->
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">6</div>
+                        <div class="step-title">Test Without GCLID</div>
+                    </div>
+                    <div class="step-description">
+                        Remove the gclid parameter from the URL and reload. The middleware should automatically regenerate a standard UUID anonymousId if it detects the current ID looks like a GCLID.
+                    </div>
+                    <div class="code-block"><pre><span style="color: #6A9955;">// Reload without gclid parameter</span>
+<span style="color: #9CDCFE;">window</span>.<span style="color: #9CDCFE;">location</span>.<span style="color: #9CDCFE;">href</span> = <span style="color: #9CDCFE;">window</span>.<span style="color: #9CDCFE;">location</span>.<span style="color: #9CDCFE;">pathname</span>;</pre></div>
+                    <button class="btn btn-secondary" onclick="runStep6()">Run Step 6 - Remove GCLID</button>
+                    <div class="step-note">
+                        💡 The middleware detects when gclid is removed and automatically calls analytics.reset() to regenerate the anonymousId
+                    </div>
+                    
+                    <!-- Step 6b Substep -->
+                    <div class="step-description" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e0e0e0;">
+                        <strong>Step 6b: Manual Verification & Reset</strong><br>
+                        If the automatic reset didn't work after reloading, use this button to manually check the state and force a reset if needed.
+                    </div>
+                    <div class="code-block"><pre><span style="color: #6A9955;">// Check current state and force reset if needed</span>
+<span style="color: #C586C0;">const</span> <span style="color: #9CDCFE;">currentId</span> = <span style="color: #9CDCFE;">analytics</span>.<span style="color: #DCDCAA;">user</span>().<span style="color: #DCDCAA;">anonymousId</span>();
+<span style="color: #C586C0;">const</span> <span style="color: #9CDCFE;">isUUID</span> = <span style="color: #CE9178;">/^[0-9a-f-]{36}$/i</span>.<span style="color: #DCDCAA;">test</span>(<span style="color: #9CDCFE;">currentId</span>);
+<span style="color: #C586C0;">if</span> (!<span style="color: #9CDCFE;">isUUID</span>) <span style="color: #9CDCFE;">analytics</span>.<span style="color: #DCDCAA;">reset</span>();</pre></div>
+                    <button class="btn btn-primary" onclick="runStep6b()" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">Run Step 6b - Verify & Reset</button>
+                    <div class="step-note" style="margin-top: 10px;">
+                        🔍 This will check if your anonymousId looks like a GCLID and reset it if necessary
+                    </div>
+                    
+                    <!-- Event trigger buttons after reset -->
+                    <div class="step-description" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e0e0e0;">
+                        <strong>Trigger Additional Events (without GCLID)</strong><br>
+                        After the reset, send page, track, and identify events to verify the new UUID anonymousId is being used.
+                    </div>
+                    <div class="btn-group">
+                        <button class="btn" onclick="triggerPageEvent()" style="background: #28a745;">📄 Page Event</button>
+                        <button class="btn" onclick="triggerTrackEvent()" style="background: #17a2b8;">📊 Track Event</button>
+                        <button class="btn" onclick="triggerIdentifyEvent()" style="background: #ffc107; color: #333;">👤 Identify Event</button>
+                    </div>
+                </div>
+            </div>
+            <!-- End left column -->
+            </div>
+
+            <!-- RIGHT COLUMN: Results -->
+            <div class="right-column">
+                <div class="status-panel">
+                    <h3>📊 Current Status</h3>
+                    <div class="status-item">
+                        <span class="status-label">Current URL:</span>
+                        <span class="status-value" id="currentUrl">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">GCLID Parameter:</span>
+                        <span class="status-value" id="gclidParam">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Anonymous ID:</span>
+                        <span class="status-value" id="anonymousId">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Match Status:</span>
+                        <span class="status-value" id="matchStatus">-</span>
+                    </div>
+                </div>
+
+                <div class="console-panel">
+                    <h3>📝 Console Log</h3>
+                    <div class="console-log" id="consoleLog">
+                        <div class="log-entry log-info">📋 Console output will appear here...</div>
+                    </div>
+                </div>
+            </div>
+            <!-- End right column -->
+        </div>
+
+        <!-- Implementation Guide Section -->
+        <div style="max-width: 1400px; margin: 40px auto; padding: 30px; background: #f8f9fa; border-radius: 8px; border: 2px solid #dee2e6;">
+            <h2 style="color: #333; margin-bottom: 20px; font-size: 2em;">📋 Implementation Guide</h2>
+            <p style="color: #666; line-height: 1.6; margin-bottom: 20px;">
+                To implement the GCLID Attribution Middleware in your production environment, add the following code to your website's <code>&lt;head&gt;</code> section. 
+                This middleware must be placed immediately after the Segment Analytics.js snippet to ensure it captures the gclid parameter before any events fire.
+            </p>
+            
+            <div style="background: #fff; border: 1px solid #dee2e6; border-radius: 6px; padding: 20px; margin-bottom: 20px;">
+                <h3 style="color: #555; margin-bottom: 15px; font-size: 1.2em;">📦 Complete Implementation Code</h3>
+                <div style="background: #2d2d2d; color: #f8f8f2; padding: 20px; border-radius: 6px; overflow-x: auto; font-family: 'Courier New', monospace; font-size: 0.9em; line-height: 1.6;">
+<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">&lt;script type="text/javascript"&gt;
+  // ===============================
+  // STEP 1: SEGMENT ANALYTICS SNIPPET
+  // ===============================
+  // This is the standard Segment Analytics.js snippet (v4.15.3)
+  // It loads the analytics library and provides methods to track events
+  
+  !function(){
+    var analytics=window.analytics=window.analytics||[];
+    if(!analytics.initialize)
+      if(analytics.invoked)
+        window.console&&console.error&&console.error("Segment snippet included twice.");
+      else{
+        analytics.invoked=!0;
+        analytics.methods=["trackSubmit","trackClick","trackLink","trackForm","pageview","identify","reset","group","track","ready","alias","debug","page","once","off","on","addSourceMiddleware","addIntegrationMiddleware","setAnonymousId","addDestinationMiddleware"];
+        analytics.factory=function(e){return function(){var t=Array.prototype.slice.call(arguments);t.unshift(e);analytics.push(t);return analytics}};
+        for(var e=0;e&lt;analytics.methods.length;e++){
+          var key=analytics.methods[e];
+          analytics[key]=analytics.factory(key)
+        }
+        analytics.load=function(key,e){
+          var t=document.createElement("script");
+          t.type="text/javascript";
+          t.async=!0;
+          t.src="https://cdn.segment.com/analytics.js/v1/" + key + "/analytics.min.js";
+          var n=document.getElementsByTagName("script")[0];
+          n.parentNode.insertBefore(t,n);
+          analytics._loadOptions=e
+        };
+        
+        // *** REPLACE WITH YOUR SEGMENT WRITE KEY ***
+        analytics._writeKey="YOUR_WRITE_KEY_HERE";
+        analytics.SNIPPET_VERSION="4.15.3";
+        
+        // *** REPLACE WITH YOUR SEGMENT WRITE KEY ***
+        analytics.load("YOUR_WRITE_KEY_HERE");
+        
+        // Fire initial page call
+        analytics.page();
+      }
+  }();
+  
+  // ===============================
+  // STEP 2: GCLID ATTRIBUTION MIDDLEWARE
+  // ===============================
+  // This source middleware captures the 'gclid' parameter from the URL
+  // and sets it as the anonymousId for all subsequent events.
+  // 
+  // HOW IT WORKS:
+  // 1. When gclid is present in URL: Sets anonymousId to gclid value
+  // 2. When gclid is removed from URL: Automatically resets to UUID
+  // 3. Persists gclid in localStorage and cookies for session continuity
+  //
+  // BENEFITS:
+  // - Consistent user attribution across Google Ads campaigns
+  // - Prevents merging of GCLID users with employee anonymousIds
+  // - Automatic cleanup when GCLID is no longer in URL
+  
+  (function() {
+    // Helper: Extract query parameter from URL
+    function getQueryParam(param) {
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        return urlParams.get(param);
+      } catch (e) {
+        // Fallback for older browsers
+        const regex = new RegExp('[?&]' + param + '=([^&#]*)');
+        const results = regex.exec(window.location.search);
+        return results ? decodeURIComponent(results[1].replace(/\+/g, ' ')) : null;
+      }
+    }
+    
+    // Helper: Check if an ID looks like a GCLID (vs standard UUID)
+    function looksLikeGclid(id) {
+      if (!id) return false;
+      // Standard Segment UUIDs match this pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+      // If it's not a UUID, it's likely a GCLID
+      return !isUUID;
+    }
+    
+    // Get gclid from URL
+    const gclid = getQueryParam('gclid');
+    
+    if (gclid) {
+      // ==========================================
+      // SCENARIO 1: GCLID is present in URL
+      // ==========================================
+      // Override the anonymousId with the gclid value
+      analytics.setAnonymousId(gclid);
+      
+      // Set a flag in localStorage to track that we've set a GCLID
+      localStorage.setItem('ajs_gclid_set', 'true');
+      
+      console.log('[GCLID Middleware] Set anonymousId to:', gclid);
+      
+    } else {
+      // ==========================================
+      // SCENARIO 2: GCLID is NOT in URL
+      // ==========================================
+      // Check if we previously set a GCLID (flag will be 'true')
+      const gclidWasSet = localStorage.getItem('ajs_gclid_set') === 'true';
+      
+      if (gclidWasSet) {
+        // We previously had a GCLID, but now it's gone from the URL
+        // We need to check if the current anonymousId is still the GCLID
+        
+        let resetExecuted = false;
+        
+        function checkAndReset() {
+          if (resetExecuted) return;
+          resetExecuted = true;
+          
+          const currentId = analytics.user().anonymousId();
+          
+          // If the current ID looks like a GCLID (not a UUID), regenerate it
+          if (looksLikeGclid(currentId)) {
+            console.log('[GCLID Middleware] GCLID removed from URL, regenerating anonymousId...');
+            
+            // Clear stored values
+            localStorage.removeItem('ajs_anonymous_id');
+            localStorage.removeItem('ajs_user_id');
+            
+            // Clear cookies
+            document.cookie = 'ajs_anonymous_id=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+            document.cookie = 'ajs_user_id=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+            
+            // Reset to generate new UUID
+            analytics.reset();
+            
+            // Update flag
+            localStorage.setItem('ajs_gclid_set', 'false');
+            
+            console.log('[GCLID Middleware] New anonymousId:', analytics.user().anonymousId());
+          } else {
+            // Already a UUID, just update the flag
+            localStorage.setItem('ajs_gclid_set', 'false');
+          }
+        }
+        
+        // Try with analytics.ready()
+        analytics.ready(checkAndReset);
+        
+        // Fallback timeout in case ready() doesn't fire
+        setTimeout(function() {
+          if (!resetExecuted) {
+            checkAndReset();
+          }
+        }, 1500);
+      }
+    }
+  })();
+  
+  // ===============================
+  // STEP 3: VERIFICATION (OPTIONAL)
+  // ===============================
+  // Log the final anonymousId after everything is set up
+  // This helps with debugging and verification
+  
+  analytics.ready(function() {
+    console.log('[GCLID Middleware] Final anonymousId:', analytics.user().anonymousId());
+    console.log('[GCLID Middleware] GCLID in URL:', new URLSearchParams(window.location.search).get('gclid') || 'none');
+  });
+  
+&lt;/script&gt;</pre>
+                </div>
+            </div>
+
+            <div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 6px; padding: 20px; margin-bottom: 20px;">
+                <h3 style="color: #856404; margin-bottom: 15px; font-size: 1.2em;">⚠️ Important Implementation Notes</h3>
+                <ul style="color: #856404; line-height: 1.8; margin-left: 20px;">
+                    <li><strong>Write Key:</strong> Replace <code>YOUR_WRITE_KEY_HERE</code> with your actual Segment Source write key (found in Segment UI under Settings > API Keys)</li>
+                    <li><strong>Placement:</strong> This code must be placed in the <code>&lt;head&gt;</code> section of your HTML, before any other Segment tracking calls</li>
+                    <li><strong>Order:</strong> The middleware MUST come immediately after the Segment snippet (Step 1) and before any <code>analytics.track()</code> or <code>analytics.page()</code> calls</li>
+                    <li><strong>Testing:</strong> Test with a URL parameter like <code>?gclid=test_123456789</code> to verify the middleware is working</li>
+                    <li><strong>Persistence:</strong> The GCLID will persist in localStorage and cookies until the user visits a URL without the gclid parameter</li>
+                    <li><strong>Automatic Reset:</strong> When a user returns without a GCLID in the URL, their anonymousId will automatically regenerate to a standard UUID</li>
+                </ul>
+            </div>
+
+            <div style="background: #d1ecf1; border: 1px solid #17a2b8; border-radius: 6px; padding: 20px;">
+                <h3 style="color: #0c5460; margin-bottom: 15px; font-size: 1.2em;">💡 How the Middleware Works</h3>
+                <div style="color: #0c5460; line-height: 1.8;">
+                    <p style="margin-bottom: 15px;"><strong>1. User clicks Google Ad with GCLID</strong></p>
+                    <ul style="margin-left: 20px; margin-bottom: 20px;">
+                        <li>URL: <code>https://yoursite.com?gclid=abc123xyz</code></li>
+                        <li>Middleware captures <code>gclid=abc123xyz</code></li>
+                        <li>Sets <code>anonymousId = "abc123xyz"</code></li>
+                        <li>Stores flag: <code>ajs_gclid_set = "true"</code></li>
+                        <li>All events (page, track, identify) use <code>abc123xyz</code> as anonymousId</li>
+                    </ul>
+                    
+                    <p style="margin-bottom: 15px;"><strong>2. User navigates to other pages (GCLID persists)</strong></p>
+                    <ul style="margin-left: 20px; margin-bottom: 20px;">
+                        <li>URL: <code>https://yoursite.com/products</code></li>
+                        <li>No gclid in URL, but flag is <code>"true"</code></li>
+                        <li>Current anonymousId is <code>"abc123xyz"</code> (looks like GCLID)</li>
+                        <li>Middleware checks: "Is this a UUID? No, it's a GCLID"</li>
+                        <li><strong>Action:</strong> Clear storage, reset to UUID (e.g., <code>"39ee7ea5-b6d8-4174-b612-04e1ef3fa952"</code>)</li>
+                        <li>Update flag: <code>ajs_gclid_set = "false"</code></li>
+                    </ul>
+                    
+                    <p style="margin-bottom: 15px;"><strong>3. User returns later without GCLID</strong></p>
+                    <ul style="margin-left: 20px;">
+                        <li>URL: <code>https://yoursite.com</code></li>
+                        <li>anonymousId is now standard UUID</li>
+                        <li>All future events use the UUID</li>
+                        <li>If user clicks another Google Ad, process repeats with new GCLID</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <footer>
+            <p>GCLID Middleware Testing | Segment Analytics.js | <a href="https://segment.com/docs/connections/sources/catalog/libraries/website/javascript/identity/" target="_blank">Documentation</a></p>
+        </footer>
+    </div>
+</body>
+</html>

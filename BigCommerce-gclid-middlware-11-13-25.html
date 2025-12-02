@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+<script type="text/javascript">
+  // ===============================
+  // STEP 1: SEGMENT ANALYTICS SNIPPET
+  // ===============================
+  // This is the standard Segment Analytics.js snippet (v4.15.3)
+  // It loads the analytics library and provides methods to track events
+  
+  !function(){
+    var analytics=window.analytics=window.analytics||[];
+    if(!analytics.initialize)
+      if(analytics.invoked)
+        window.console&&console.error&&console.error("Segment snippet included twice.");
+      else{
+        analytics.invoked=!0;
+        analytics.methods=["trackSubmit","trackClick","trackLink","trackForm","pageview","identify","reset","group","track","ready","alias","debug","page","once","off","on","addSourceMiddleware","addIntegrationMiddleware","setAnonymousId","addDestinationMiddleware"];
+        analytics.factory=function(e){return function(){var t=Array.prototype.slice.call(arguments);t.unshift(e);analytics.push(t);return analytics}};
+        for(var e=0;e<analytics.methods.length;e++){
+          var key=analytics.methods[e];
+          analytics[key]=analytics.factory(key)
+        }
+        analytics.load=function(key,e){
+          var t=document.createElement("script");
+          t.type="text/javascript";
+          t.async=!0;
+          t.src="https://cdn.segment.com/analytics.js/v1/" + key + "/analytics.min.js";
+          var n=document.getElementsByTagName("script")[0];
+          n.parentNode.insertBefore(t,n);
+          analytics._loadOptions=e
+        };
+        
+        // *** REPLACE WITH YOUR SEGMENT WRITE KEY ***
+        analytics._writeKey="GHWp3Jhvn2GBHxspEdZBRVhDmJKM4XC1";
+        analytics.SNIPPET_VERSION="4.15.3";
+        
+        // *** REPLACE WITH YOUR SEGMENT WRITE KEY ***
+        analytics.load("GHWp3Jhvn2GBHxspEdZBRVhDmJKM4XC1");
+        
+        // Fire initial page call
+        analytics.page();
+      }
+  }();
+  
+  // ===============================
+  // STEP 2: GCLID ATTRIBUTION MIDDLEWARE
+  // ===============================
+  // This source middleware captures the 'gclid' parameter from the URL
+  // and sets it as the anonymousId for all subsequent events.
+  // 
+  // HOW IT WORKS:
+  // 1. When gclid is present in URL: Sets anonymousId to gclid value
+  // 2. When gclid is removed from URL: Automatically resets to UUID
+  // 3. Persists gclid in localStorage and cookies for session continuity
+  //
+  // BENEFITS:
+  // - Consistent user attribution across Google Ads campaigns
+  // - Prevents merging of GCLID users with employee anonymousIds
+  // - Automatic cleanup when GCLID is no longer in URL
+  
+  (function() {
+    // Helper: Extract query parameter from URL
+    function getQueryParam(param) {
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        return urlParams.get(param);
+      } catch (e) {
+        // Fallback for older browsers
+        const regex = new RegExp('[?&]' + param + '=([^&#]*)');
+        const results = regex.exec(window.location.search);
+        return results ? decodeURIComponent(results[1].replace(/\+/g, ' ')) : null;
+      }
+    }
+    
+    // Helper: Check if an ID looks like a GCLID (vs standard UUID)
+    function looksLikeGclid(id) {
+      if (!id) return false;
+      // Standard Segment UUIDs match this pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+      // If it's not a UUID, it's likely a GCLID
+      return !isUUID;
+    }
+    
+    // Get gclid from URL
+    const gclid = getQueryParam('gclid');
+    
+    if (gclid) {
+      // ==========================================
+      // SCENARIO 1: GCLID is present in URL
+      // ==========================================
+      // Override the anonymousId with the gclid value
+      analytics.setAnonymousId(gclid);
+      
+      // Set a flag in localStorage to track that we've set a GCLID
+      localStorage.setItem('ajs_gclid_set', 'true');
+      
+      console.log('[GCLID Middleware] Set anonymousId to:', gclid);
+      
+    } else {
+      // ==========================================
+      // SCENARIO 2: GCLID is NOT in URL
+      // ==========================================
+      // Check if we previously set a GCLID (flag will be 'true')
+      const gclidWasSet = localStorage.getItem('ajs_gclid_set') === 'true';
+      
+      if (gclidWasSet) {
+        // We previously had a GCLID, but now it's gone from the URL
+        // We need to check if the current anonymousId is still the GCLID
+        
+        let resetExecuted = false;
+        
+        function checkAndReset() {
+          if (resetExecuted) return;
+          resetExecuted = true;
+          
+          const currentId = analytics.user().anonymousId();
+          
+          // If the current ID looks like a GCLID (not a UUID), regenerate it
+          if (looksLikeGclid(currentId)) {
+            console.log('[GCLID Middleware] GCLID removed from URL, regenerating anonymousId...');
+            
+            // Clear stored values
+            localStorage.removeItem('ajs_anonymous_id');
+            localStorage.removeItem('ajs_user_id');
+            
+            // Clear cookies
+            document.cookie = 'ajs_anonymous_id=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+            document.cookie = 'ajs_user_id=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+            
+            // Reset to generate new UUID
+            analytics.reset();
+            
+            // Update flag
+            localStorage.setItem('ajs_gclid_set', 'false');
+            
+            console.log('[GCLID Middleware] New anonymousId:', analytics.user().anonymousId());
+          } else {
+            // Already a UUID, just update the flag
+            localStorage.setItem('ajs_gclid_set', 'false');
+          }
+        }
+        
+        // Try with analytics.ready()
+        analytics.ready(checkAndReset);
+        
+        // Fallback timeout in case ready() doesn't fire
+        setTimeout(function() {
+          if (!resetExecuted) {
+            checkAndReset();
+          }
+        }, 1500);
+      }
+    }
+  })();
+  
+  // ===============================
+  // STEP 3: VERIFICATION (OPTIONAL)
+  // ===============================
+  // Log the final anonymousId after everything is set up
+  // This helps with debugging and verification
+  
+  analytics.ready(function() {
+    console.log('[GCLID Middleware] Final anonymousId:', analytics.user().anonymousId());
+    console.log('[GCLID Middleware] GCLID in URL:', new URLSearchParams(window.location.search).get('gclid') || 'none');
+  });
+  
+</script>
+</head>
+<body>
+    
+</body>
+</html>

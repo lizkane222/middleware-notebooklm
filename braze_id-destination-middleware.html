@@ -1,0 +1,1036 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Braze ID User Identification Middleware Testing</title>
+
+    <script type="text/javascript">
+        // ===============================
+        // STEP 1: SEGMENT ANALYTICS SNIPPET (Part A)
+        // Segment Analytics.js Snippet v5.2.0
+        // ===============================
+        !function(){var i="analytics",analytics=window[i]=window[i]||[];if(!analytics.initialize)if(analytics.invoked)window.console&&console.error&&console.error("Segment snippet included twice.");else{analytics.invoked=!0;analytics.methods=["trackSubmit","trackClick","trackLink","trackForm","pageview","identify","reset","group","track","ready","alias","debug","page","screen","once","off","on","addSourceMiddleware","addIntegrationMiddleware","setAnonymousId","addDestinationMiddleware","register"];analytics.factory=function(e){return function(){if(window[i].initialized)return window[i][e].apply(window[i],arguments);var n=Array.prototype.slice.call(arguments);if(["track","screen","alias","group","page","identify"].indexOf(e)>-1){var c=document.querySelector("link[rel='canonical']");n.push({__t:"bpc",c:c&&c.getAttribute("href")||void 0,p:location.pathname,u:location.href,s:location.search,t:document.title,r:document.referrer})}n.unshift(e);analytics.push(n);return analytics}};for(var n=0;n<analytics.methods.length;n++){var key=analytics.methods[n];analytics[key]=analytics.factory(key)}analytics.load=function(key,n){var t=document.createElement("script");t.type="text/javascript";t.async=!0;t.setAttribute("data-global-segment-analytics-key",i);t.src="https://cdn.segment.com/analytics.js/v1/" + key + "/analytics.min.js";var r=document.getElementsByTagName("script")[0];r.parentNode.insertBefore(t,r);analytics._loadOptions=n};analytics._writeKey="GHWp3Jhvn2GBHxspEdZBRVhDmJKM4XC1";;analytics.SNIPPET_VERSION="5.2.0";
+        analytics.load("GHWp3Jhvn2GBHxspEdZBRVhDmJKM4XC1");
+        analytics.page({}, {}, function() {
+            // Trigger identify call 2 seconds after page event to ensure Braze profile creation
+            setTimeout(function() {
+                analytics.identify();
+                console.log('[Snippet] Delayed identify() called 5 seconds after page event to create Braze profile');
+            }, 5000);
+        });
+        }}();
+
+        // ===============================
+        // UI HELPER FUNCTIONS (Part E)
+        // ===============================
+
+        function logToConsole(message, type = 'info') {
+            const consoleLog = document.getElementById('consoleLog');
+            if (!consoleLog) { console.error('Console log element not found!'); return; }
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            const timestamp = new Date().toLocaleTimeString();
+
+            if (type === 'json') {
+                entry.innerHTML = `<span style="color: #9cdcfe;">[${timestamp}]</span> ${syntaxHighlightJSON(message)}`;
+            } else {
+                entry.textContent = `[${timestamp}] ${message}`;
+            }
+
+            consoleLog.appendChild(entry);
+            consoleLog.scrollTop = consoleLog.scrollHeight;
+            console.log(message);
+        }
+
+        function syntaxHighlightJSON(json) {
+            let obj = typeof json === 'string' ? JSON.parse(json) : json;
+            let formatted = JSON.stringify(obj, null, 2);
+            formatted = formatted
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function(match) {
+                    let cls = 'number';
+                    if (/^"/.test(match)) {
+                        if (/:$/.test(match)) {
+                            cls = 'key';
+                            match = match.slice(0, -1);
+                            return '<span style="color: #9cdcfe;">' + match + '</span><span style="color: #d4d4d4;">:</span>';
+                        } else {
+                            cls = 'string';
+                            return '<span style="color: #ce9178;">' + match + '</span>';
+                        }
+                    } else if (/true|false/.test(match)) {
+                        cls = 'boolean';
+                        return '<span style="color: #569cd6;">' + match + '</span>';
+                    } else if (/null/.test(match)) {
+                        cls = 'null';
+                        return '<span style="color: #569cd6;">' + match + '</span>';
+                    } else {
+                        return '<span style="color: #b5cea8;">' + match + '</span>';
+                    }
+                });
+            return '<pre style="margin: 0; line-height: 1.6; font-family: \'Courier New\', monospace;">' + formatted + '</pre>';
+        }
+
+        function updateStatus() {
+            if (typeof analytics !== 'undefined' && analytics.user) {
+                const user = analytics.user();
+                const anonId = user.anonymousId() || 'N/A';
+                const localStorageAnonId = localStorage.getItem('ajs_anonymous_id') || 'None';
+                const brazeId = localStorage.getItem('braze_id') || 'None';
+                const userId = user.id() || 'N/A';
+                const traits = localStorage.getItem('ajs_user_traits') || 'None';
+
+                document.getElementById('anonymousId').textContent = anonId;
+                document.getElementById('brazeIdStatus').textContent = brazeId;
+                document.getElementById('ajsAnonymousId').textContent = localStorageAnonId;
+                document.getElementById('ajsUserId').textContent = userId;
+                document.getElementById('ajsUserTraits').textContent = traits;
+                
+                // Check Braze SDK device_id
+                if (window.braze && window.braze.getDeviceId) {
+                    const brazeDeviceId = window.braze.getDeviceId();
+                    if (document.getElementById('brazeDeviceId')) {
+                        document.getElementById('brazeDeviceId').textContent = brazeDeviceId || 'Not available';
+                        if (brazeDeviceId) {
+                            document.getElementById('brazeDeviceId').classList.add('success');
+                            document.getElementById('brazeDeviceId').classList.remove('error');
+                        } else {
+                            document.getElementById('brazeDeviceId').classList.remove('success');
+                            document.getElementById('brazeDeviceId').classList.add('error');
+                        }
+                    }
+                } else {
+                    if (document.getElementById('brazeDeviceId')) {
+                        document.getElementById('brazeDeviceId').textContent = 'SDK not loaded';
+                        document.getElementById('brazeDeviceId').classList.remove('success');
+                        document.getElementById('brazeDeviceId').classList.add('error');
+                    }
+                }
+                
+                if (brazeId !== 'None') {
+                    document.getElementById('brazeIdStatus').classList.add('success');
+                    document.getElementById('brazeIdStatus').classList.remove('error');
+                } else {
+                    document.getElementById('brazeIdStatus').classList.remove('success');
+                    document.getElementById('brazeIdStatus').classList.add('error');
+                }
+            }
+        }
+
+        // ===============================
+        // BRAZE MIDDLEWARE LOGIC (Part C)
+        // Fetches Braze ID and injects it into context.braze_id [3, 6]
+        // ===============================
+
+        // NOTE: Braze REST API cannot be called directly from the browser due to CORS restrictions.
+        // Instead, we'll access the Braze SDK instance that's loaded by Segment's Braze destination.
+        // The Braze SDK automatically generates and stores a braze_id (device_id) when initialized.
+
+        // This function retrieves the Braze ID from the Braze Web SDK instance [3]
+        function fetchBrazeIDNow() {
+            logToConsole(`[Braze Lookup] ⏰ INITIATING Braze ID retrieval from SDK...`, 'gclid');
+            
+            const anonymousId = analytics.user().anonymousId();
+            if (!anonymousId) {
+                logToConsole("[Braze Lookup] ❌ No anonymousId found. Skipping Braze lookup.", 'error');
+                return Promise.resolve();
+            }
+
+            logToConsole(`[Braze Lookup] ✅ START: Retrieving Braze ID for anonymousId: ${anonymousId}`, 'success');
+
+            // Access the Braze SDK instance via window.braze (loaded by Segment's Braze destination)
+            return new Promise((resolve, reject) => {
+                // Wait for Braze SDK to be available
+                const checkBrazeSDK = setInterval(() => {
+                    if (window.braze && window.braze.getDeviceId) {
+                        clearInterval(checkBrazeSDK);
+                        
+                        logToConsole(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, 'info');
+                        logToConsole(`[Braze SDK] ✅ Braze SDK detected!`, 'success');
+                        
+                        // Get the Braze device_id (this is the braze_id)
+                        const brazeId = window.braze.getDeviceId();
+                        
+                        if (brazeId) {
+                            logToConsole(`[Braze SDK] 🎯 Retrieved Braze ID (device_id): ${brazeId}`, 'success');
+                            
+                            // Store in localStorage
+                            localStorage.setItem("braze_id", brazeId);
+                            logToConsole(`[Braze SDK] 💾 Stored in localStorage['braze_id']: ${brazeId}`, 'success');
+                            logToConsole(`[Braze SDK] 📍 Storage location: localStorage (persists across page reloads)`, 'info');
+
+                            // Optionally push to Segment as a trait
+                            analytics.identify({ braze_id: brazeId });
+                            logToConsole(`[Braze SDK] 📤 Sent analytics.identify({ braze_id: "${brazeId}" }) to Segment`, 'success');
+                            
+                            updateStatus();
+                            resolve(brazeId);
+                        } else {
+                            logToConsole("[Braze SDK] ⚠️ No Braze ID found in SDK.", 'error');
+                            reject(new Error('No Braze ID available'));
+                        }
+                        
+                        logToConsole(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, 'info');
+                    }
+                }, 100); // Check every 100ms
+                
+                // Timeout after 10 seconds
+                setTimeout(() => {
+                    clearInterval(checkBrazeSDK);
+                    if (!window.braze || !window.braze.getDeviceId) {
+                        logToConsole(`[Braze SDK] ❌ Braze SDK not found after 10 seconds`, 'error');
+                        logToConsole(`[Braze SDK] 💡 Make sure Braze destination is enabled in Segment`, 'info');
+                        reject(new Error('Braze SDK not available'));
+                    }
+                }, 10000);
+            });
+        }
+
+        // Destination Middleware: inject braze_id into all events once known [6, 7]
+        const brazeIdMiddleware = ({ payload, next }) => {
+            const brazeId = localStorage.getItem("braze_id");
+
+            if (brazeId) {
+                payload.obj.context = payload.obj.context || {};
+                payload.obj.context.braze_id = brazeId;
+                logToConsole(`[Braze Injection] Injected braze_id: ${brazeId} into context.braze_id.`, 'gclid');
+            }
+
+            next(payload);
+        };
+
+        // Initialize Braze ID lookup (Original implementation, runs after 30s delay)
+        // NOTE: We rely on manual steps/buttons to trigger this instantly for testing.
+        function initializeBrazeLookup() {
+             // Changed to 30 seconds for production testing with countdown
+             const lookupDelay = 30000; 
+             const startTime = Date.now();
+
+             analytics.ready(() => {
+                logToConsole(`[Auto-Lookup] 🕐 Analytics.js is ready. Starting 30-second countdown before Braze lookup...`, 'info');
+                
+                // Countdown timer - log every 5 seconds
+                const countdownInterval = setInterval(() => {
+                    const elapsed = Date.now() - startTime;
+                    const remaining = Math.ceil((lookupDelay - elapsed) / 1000);
+                    
+                    if (remaining > 0 && remaining % 5 === 0) {
+                        logToConsole(`[Auto-Lookup] ⏳ ${remaining} seconds remaining until Braze ID lookup...`, 'info');
+                    }
+                    
+                    if (elapsed >= lookupDelay) {
+                        clearInterval(countdownInterval);
+                    }
+                }, 1000);
+
+                setTimeout(() => {
+                    clearInterval(countdownInterval);
+                    logToConsole(`[Auto-Lookup] ⏰ 30 seconds elapsed! Checking for existing braze_id...`, 'gclid');
+                    
+                    // Check if braze_id already exists
+                    const existingBrazeId = localStorage.getItem("braze_id");
+                    if (existingBrazeId) {
+                        logToConsole(`[Auto-Lookup] ✅ braze_id already exists in localStorage: ${existingBrazeId}`, 'success');
+                        logToConsole(`[Auto-Lookup] ⏭️ Skipping automatic lookup (already have ID).`, 'info');
+                    } else {
+                        logToConsole(`[Auto-Lookup] 🔍 No braze_id found in localStorage. Initiating lookup...`, 'info');
+                        fetchBrazeIDNow();
+                    }
+                }, lookupDelay); 
+            });
+        }
+
+        function clearLocalStorage() {
+            localStorage.removeItem('ajs_anonymous_id');
+            localStorage.removeItem('ajs_user_id');
+            localStorage.removeItem('ajs_user_traits');
+            localStorage.removeItem('braze_id');
+            
+            // Call Segment's reset to clear cookies and in-memory state
+            if (typeof analytics !== 'undefined') {
+                analytics.reset();
+                logToConsole('Segment state reset: cookies and localStorage cleared.', 'info');
+            }
+            updateStatus();
+        }
+
+        function resetEverything() {
+            if (confirm('⚠️ This will clear ALL cookies, localStorage, Braze session data, and reset Segment. Continue?')) {
+                try {
+                    logToConsole('[RESET] Clearing all data...', 'info');
+                } catch(e) {
+                    console.log('[RESET] Clearing all data...');
+                }
+                
+                // Clear Braze SDK session data FIRST (before Segment reset)
+                // This ensures Braze generates a new device_id on next session
+                try {
+                    // Clear Braze Web SDK (Actions) localStorage keys
+                    const brazeKeys = [
+                        'ab.storage.sdk_metadata',
+                        'ab.storage.device_id', 
+                        'ab.storage.user_id',
+                        'ab.storage.session_id',
+                        'ab.storage.last_request_time',
+                        'ab.storage.triggers',
+                        'ab.storage.events',
+                        'ab.storage.attributes',
+                        'ab.optedOut',
+                        'ab.storage.userId',
+                        'ab.storage.deviceId'
+                    ];
+                    
+                    brazeKeys.forEach(function(key) {
+                        if (localStorage.getItem(key)) {
+                            localStorage.removeItem(key);
+                            try {
+                                logToConsole('[RESET] Cleared Braze key: ' + key, 'info');
+                            } catch(e) {
+                                console.log('[RESET] Cleared Braze key: ' + key);
+                            }
+                        }
+                    });
+                    
+                    try {
+                        logToConsole('[RESET] ✅ Braze session data cleared (new device_id will be generated)', 'success');
+                    } catch(e) {
+                        console.log('[RESET] Braze session data cleared');
+                    }
+                } catch (e) {
+                    try {
+                        logToConsole('[RESET] Error clearing Braze data: ' + e.message, 'error');
+                    } catch(err) {
+                        console.log('[RESET] Error clearing Braze data: ' + e.message);
+                    }
+                }
+                
+                // Reset Segment
+                if (typeof analytics !== 'undefined' && analytics.reset) {
+                    analytics.reset();
+                    try {
+                        logToConsole('[RESET] Segment analytics.reset() called', 'success');
+                    } catch(e) {
+                        console.log('[RESET] Segment analytics.reset() called');
+                    }
+                }
+                
+                // Clear all localStorage (catches any remaining keys)
+                try {
+                    localStorage.clear();
+                    try {
+                        logToConsole('[RESET] localStorage cleared completely', 'success');
+                    } catch(e) {
+                        console.log('[RESET] localStorage cleared completely');
+                    }
+                } catch (e) {
+                    try {
+                        logToConsole('[RESET] Error clearing localStorage: ' + e.message, 'error');
+                    } catch(err) {
+                        console.log('[RESET] Error clearing localStorage: ' + e.message);
+                    }
+                }
+                
+                // Clear all cookies (including Braze cookies)
+                try {
+                    const cookies = document.cookie.split(';');
+                    for (let i = 0; i < cookies.length; i++) {
+                        const cookie = cookies[i];
+                        const eqPos = cookie.indexOf('=');
+                        const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim();
+                        // Clear for current path
+                        document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
+                        // Clear for root domain
+                        document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=' + window.location.hostname;
+                        // Clear for parent domain
+                        const parts = window.location.hostname.split('.');
+                        if (parts.length > 2) {
+                            const parentDomain = '.' + parts.slice(-2).join('.');
+                            document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=' + parentDomain;
+                        }
+                    }
+                    try {
+                        logToConsole('[RESET] All cookies cleared (including Braze)', 'success');
+                    } catch(e) {
+                        console.log('[RESET] All cookies cleared');
+                    }
+                } catch (e) {
+                    try {
+                        logToConsole('[RESET] Error clearing cookies: ' + e.message, 'error');
+                    } catch(err) {
+                        console.log('[RESET] Error clearing cookies: ' + e.message);
+                    }
+                }
+                
+                try {
+                    logToConsole('[RESET] ✅ Complete! Reloading page NOW...', 'success');
+                    logToConsole('[RESET] 🆕 New Segment anonymousId & Braze device_id will be generated', 'info');
+                } catch(e) {
+                    console.log('[RESET] Complete! Reloading page NOW...');
+                }
+                
+                // Reload page immediately for hard reset
+                setTimeout(function() {
+                    window.location.reload(true);
+                }, 500);
+            }
+        }
+
+        // ===============================
+        // TEST STEP FUNCTIONS (Part F)
+        // ===============================
+
+        // Step 1: Initial State Check
+        function runStep1() {
+            logToConsole('[Step 1] Verifying current identity and storage status.', 'info');
+            updateStatus();
+            
+            // Check Braze SDK for device_id
+            if (window.braze && window.braze.getDeviceId) {
+                const brazeDeviceId = window.braze.getDeviceId();
+                logToConsole(`[Step 1] Braze SDK device_id: ${brazeDeviceId || 'Not available'}`, brazeDeviceId ? 'success' : 'error');
+            } else {
+                logToConsole('[Step 1] Braze SDK not yet initialized', 'info');
+            }
+            
+            alert('✓ Step 1 Complete. Check the Status Panel and Console Log for baseline user identity, local storage contents, and Braze device_id.');
+        }
+
+        // Step 2: Clear State (Now uses resetEverything from reset button)
+        function runStep2() {
+            logToConsole('[Step 2] Triggering full reset (same as RESET CLIENT button).', 'info');
+            resetEverything();
+        }
+
+        // Step 3: Client-side Braze SDK device_id lookup with fallback
+        function runStep3() {
+            logToConsole('[Step 3] Checking for Braze SDK device_id on the client...', 'info');
+            
+            // Check if Braze SDK is available
+            if (window.braze && window.braze.getDeviceId) {
+                const brazeDeviceId = window.braze.getDeviceId();
+                
+                if (brazeDeviceId) {
+                    logToConsole(`[Step 3] ✅ Braze SDK device_id found: ${brazeDeviceId}`, 'success');
+                    logToConsole(`[Step 3] Storing device_id in localStorage['braze_id']`, 'info');
+                    localStorage.setItem('braze_id', brazeDeviceId);
+                    updateStatus();
+                    alert(`✓ Step 3 Complete. Braze device_id found: ${brazeDeviceId}`);
+                } else {
+                    logToConsole('[Step 3] ⚠️ No device_id available from Braze SDK yet', 'error');
+                    logToConsole('[Step 3] Triggering identify call to help Braze create profile...', 'info');
+                    
+                    // Make identify call with email or phone to trigger Braze profile creation
+                    analytics.identify({
+                        stated_email: 'test-user-' + Date.now() + '@example.com',
+                        stated_phone: '+1-555-' + Math.floor(Math.random() * 10000)
+                    });
+                    
+                    logToConsole('[Step 3] ✅ Identify call sent with stated_email and stated_phone', 'success');
+                    logToConsole('[Step 3] Wait a few seconds, then run Step 4 to check if device_id is now available', 'info');
+                    alert('✓ Step 3 Complete. No device_id found yet. Identify call sent. Wait 3-5 seconds, then run Step 4.');
+                }
+            } else {
+                logToConsole('[Step 3] ❌ Braze SDK not initialized yet', 'error');
+                logToConsole('[Step 3] Make sure Braze destination is enabled in Segment', 'error');
+                alert('❌ Braze SDK not found. Ensure Braze destination is connected in Segment.');
+            }
+            
+            /* COMMENTED OUT - Original Step 3 (External API Lookup)
+            logToConsole('[Step 3] Manually triggering Braze ID lookup immediately (bypassing 30s delay).', 'info');
+            fetchBrazeIDNow().then(() => {
+                alert('✓ Step 3 Complete. Check Console Log for API Request/Response and Status Panel for new braze_id in localStorage.');
+            });
+            */
+        }
+
+        // Step 4: Check for device_id and inject into context.device.id
+        function runStep4() {
+            logToConsole('[Step 4] Checking if Braze device_id is now available...', 'info');
+            
+            if (window.braze && window.braze.getDeviceId) {
+                const brazeDeviceId = window.braze.getDeviceId();
+                
+                if (brazeDeviceId) {
+                    logToConsole(`[Step 4] ✅ Braze device_id found: ${brazeDeviceId}`, 'success');
+                    
+                    // Store it if not already stored
+                    const storedId = localStorage.getItem('braze_id');
+                    if (storedId !== brazeDeviceId) {
+                        localStorage.setItem('braze_id', brazeDeviceId);
+                        logToConsole(`[Step 4] Updated localStorage['braze_id'] with device_id`, 'success');
+                    }
+                    
+                    // Send a track event with device_id injected into context.device.id
+                    logToConsole('[Step 4] Sending Track event with device_id in context.device.id...', 'info');
+                    
+                    analytics.track('Test Event with Device ID', {
+                        order_id: 'TEST-' + Date.now(),
+                        revenue: 99.99
+                    }, {
+                        device: {
+                            id: brazeDeviceId
+                        }
+                    });
+                    
+                    logToConsole(`[Step 4] ✅ Track event sent with context.device.id = ${brazeDeviceId}`, 'success');
+                    logToConsole('[Step 4] Check the console log JSON payload to verify context.device.id field', 'info');
+                    updateStatus();
+                    alert(`✓ Step 4 Complete. Track event sent with device_id: ${brazeDeviceId}. Check console for full payload.`);
+                } else {
+                    logToConsole('[Step 4] ⚠️ Still no device_id available from Braze SDK', 'error');
+                    logToConsole('[Step 4] This may indicate Braze is still initializing. Wait longer or check Network tab for Braze /data calls', 'info');
+                    alert('⚠️ No device_id available yet. Check Network tab for Braze /data requests. Try again in a few seconds.');
+                }
+            } else {
+                logToConsole('[Step 4] ❌ Braze SDK not initialized', 'error');
+                alert('❌ Braze SDK not found.');
+            }
+        }
+        
+        // Step 5: Clear Braze ID
+        function runStep5() {
+             logToConsole('[Step 5] Clearing Braze ID from localStorage (simulating user not found scenario).', 'info');
+             localStorage.removeItem('braze_id');
+             logToConsole('[Step 5] braze_id removed from localStorage.', 'success');
+             updateStatus();
+             alert('✓ Step 5 Complete. braze_id has been cleared from localStorage. Send another event (Step 4) to verify context.braze_id is no longer injected.');
+        }
+        
+
+        // ===============================
+        // MIDDLEWARE REGISTRATION (Part G)
+        // Must come AFTER all dependencies are defined
+        // ===============================
+
+        // EVENT LOGGER SOURCE MIDDLEWARE
+        // Logs all Segment events to the UI console [4, 5]
+        analytics.addSourceMiddleware(function({ payload, next }) {
+            setTimeout(function() {
+                if (typeof logToConsole === 'function') {
+                    const eventType = payload.obj.type;
+                    const eventName = payload.obj.event || payload.obj.name || eventType;
+                    logToConsole(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, 'info');
+                    logToConsole(`📡 ${eventType.toUpperCase()} Event: ${eventName}`, 'success');
+                    logToConsole(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, 'info');
+                    const jsonPayload = JSON.stringify(payload.obj, null, 2);
+                    logToConsole(jsonPayload, 'json');
+                    logToConsole(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, 'info');
+                } else {
+                    console.log('[EVENT LOGGER] Event captured:', payload.obj.type, payload.obj.event || '', payload.obj);
+                }
+            }, 50);
+            next(payload);
+        });
+        console.log('[EVENT LOGGER] Source Middleware registered - all Segment events logged.');
+
+        // BRAZE ID INJECTION SOURCE MIDDLEWARE
+        // Injects braze_id into context for ALL events (warehouses, destinations, etc.)
+        analytics.addSourceMiddleware(function({ payload, next }) {
+            const brazeId = localStorage.getItem("braze_id");
+            
+            if (brazeId) {
+                payload.obj.context = payload.obj.context || {};
+                payload.obj.context.braze_id = brazeId;
+                
+                if (typeof logToConsole === 'function') {
+                    logToConsole(`[Braze ID Injection] Added braze_id to context: ${brazeId}`, 'gclid');
+                }
+            }
+            
+            next(payload);
+        });
+        console.log('[Braze ID Injection] Source Middleware registered - braze_id added to all events.');
+
+        // BRAZE DESTINATION MIDDLEWARE (Optional - for Braze-specific logic)
+        // This can be used for additional Braze-specific transformations if needed
+        analytics.addDestinationMiddleware('Braze Web Mode (Actions)', brazeIdMiddleware);
+        console.log('[Braze Destination] Destination Middleware registered for Braze Web Mode (Actions).');
+
+        // ===============================
+        // INITIALIZATION LOGIC (Part H)
+        // ===============================
+
+        document.addEventListener('DOMContentLoaded', function() {
+            const consoleLog = document.getElementById('consoleLog');
+            if (consoleLog) {
+                consoleLog.innerHTML = '';
+                logToConsole('🚀 Page loaded, initializing...', 'info');
+                logToConsole('⏳ Waiting for Analytics.js and middleware registration...', 'info');
+            }
+        });
+
+        analytics.ready(function() {
+            logToConsole('✅ Analytics.js loaded and ready', 'success');
+            // Optional: Start the original 30s lookup process (shortened to 1s)
+            initializeBrazeLookup();
+            updateStatus();
+        });
+
+        // Update status every 2 seconds
+        setInterval(updateStatus, 2000);
+    </script>
+
+    <!-- CSS STYLING (Based on GCLID : template) -->
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; min-height: 100vh; }
+        .container { max-width: 1700px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2); overflow: hidden; }
+        .content { display: grid; grid-template-columns: 1fr 500px; gap: 0; min-height: calc(100vh - 200px); }
+        .left-column { padding: 30px; overflow-y: auto; max-height: calc(100vh - 200px); border-right: 2px solid #e0e0e0; }
+        .right-column { padding: 15px; background: #f8f9fa; overflow-y: auto; max-height: calc(100vh - 200px); position: sticky; top: 0; }
+        header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; position: relative; }
+        .reset-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-size: 0.9em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+        .reset-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            border-color: white;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+        .reset-btn:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+        h1 { font-size: 2.5em; margin-bottom: 10px; }
+        .subtitle { font-size: 1.1em; opacity: 0.9; }
+        .info-box { background: #e7f3ff; border-left: 4px solid #2196F3; padding: 20px; margin-bottom: 30px; border-radius: 4px; }
+        .info-box h2 { color: #1976D2; margin-bottom: 10px; font-size: 1.3em; }
+        .info-box p { line-height: 1.6; color: #555; }
+        .test-steps h2 { margin-bottom: 20px; color: #333; }
+        .status-panel { background: white; border: 2px solid #dee2e6; border-radius: 8px; padding: 2%; margin-bottom: 10px; max-height: 50%; }
+        .status-panel h3 { margin-bottom: 10px; color: #333; font-size: 1em; }
+        .status-item { display: flex; justify-content: space-between; padding: 10px; background: white; margin-bottom: 10px; border-radius: 4px; border: 1px solid #e0e0e0; }
+        .status-label { font-size: .8em; font-weight: 600; color: #555; }
+        .status-value { font-size: .7em; font-family: 'Courier New', monospace; color: #667eea; word-break: break-all; }
+        .status-value.success { color: #28a745; font-weight: bold; }
+        .status-value.error { color: #dc3545; font-weight: bold; }
+        .test-steps { margin-top: 30px; }
+        .step { background: white; border: 2px solid #e0e0e0; border-radius: 8px; padding: 20px; margin-bottom: 20px; transition: all 0.3s; }
+        .step:hover { border-color: #667eea; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15); }
+        .step-header { display: flex; align-items: center; margin-bottom: 15px; }
+        .step-number { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 1.2em; margin-right: 15px; }
+        .step-title { font-size: 1.3em; color: #333; font-weight: 600; }
+        .step-description { color: #666; line-height: 1.6; margin-bottom: 15px; }
+        .code-block { background: #2d2d2d; color: #f8f8f2; padding: 15px; border-radius: 6px; overflow-x: auto; margin-bottom: 15px; font-family: 'Courier New', monospace; font-size: 0.9em; }
+        .code-block pre { margin: 0; }
+        .step-note { background: #fff9e6; border-left: 4px solid #ffc107; padding: 12px; margin-top: 15px; border-radius: 4px; font-size: 0.95em; color: #666; }
+        .btn { background: linear-gradient(135deg, #007bff 0%, #0056b3 100%); color: white; border: none; padding: 12px 24px; border-radius: 6px; font-size: 1em; font-weight: 600; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 8px rgba(0, 123, 255, 0.3); }
+        .btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0, 123, 255, 0.4); }
+        .btn-secondary { background: #dc3545; box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3); }
+        .console-panel { background: white; border: 2px solid #dee2e6; border-radius: 8px; padding: 2%; height: 48%; }
+        .console-panel h3 { margin-bottom: 5px; color: #333; font-size: 1em; }
+        .console-log { background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 4px; height: 95%; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 0.85em; line-height: 1.5; }
+        .log-entry { margin-bottom: 5px; padding: 5px; border-radius: 3px; white-space: pre-wrap; word-break: break-word; }
+        .log-gclid { color: #4ec9b0; font-weight: bold; }
+        .log-info { color: #9cdcfe; }
+        .log-success { color: #4ec9b0; }
+        .log-error { color: #f48771; font-weight: bold; }
+        .log-json { color: #ce9178; font-family: 'Courier New', monospace; font-size: 0.9em; white-space: pre-wrap; line-height: 1.6; }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <header>
+            <button class="reset-btn" onclick="resetEverything()">RESET CLIENT</button>
+            <h1>🔥 Segment Braze User Identification Middleware</h1>
+            <p class="subtitle">Fetches Braze ID using Anonymous ID and injects it into event context.</p>
+        </header>
+
+        <div class="content">
+
+            <!-- LEFT COLUMN: Test Steps -->
+            <div class="left-column">
+
+                <div class="info-box">
+                    <h2>Middleware Functionality</h2>
+                    <p>
+                        This solution utilizes <strong>three middleware functions</strong> to fetch and inject the Braze ID into all Segment events:
+                    </p>
+                    <ol style="margin-top: 10px; margin-left: 20px; line-height: 1.8;">
+                        <li style="margin-bottom: 15px;">
+                            <strong>Delayed Lookup Function (Runs Once After Page Load):</strong><br>
+                            Waits 30 seconds (shortened to 1 second for testing) after Analytics.js loads, then makes a <strong>real external API call</strong> to Braze's <code>/users/export/ids</code> endpoint [10]. It sends the client's Segment <code>anonymousId</code> as the lookup key [3]. If a Braze user is found, it saves the <code>braze_id</code> to <code>localStorage</code> [7] and calls <code>analytics.identify({ braze_id: brazeId })</code> to sync the trait with Segment [7].
+                        </li>
+                        <li style="margin-bottom: 15px;">
+                            <strong>Source Middleware (Runs on Every Event):</strong><br>
+                            Registered as a <strong>Source Middleware</strong> that intercepts <strong>all</strong> outgoing Segment events before they're sent to any destination [6]. It checks <code>localStorage</code> for the <code>braze_id</code> and injects it into <code>context.braze_id</code> for every event [6]. This ensures the Braze ID is available in data warehouses, analytics tools, and all downstream destinations.
+                        </li>
+                        <li style="margin-bottom: 15px;">
+                            <strong>Destination Middleware (Runs for Braze Events Only):</strong><br>
+                            Registered as a <strong>Destination Middleware</strong> specifically for "Braze Web Mode (Actions)" [6]. This allows for additional Braze-specific transformations or logic if needed, ensuring the <code>braze_id</code> is present in the context even if it wasn't already added by the Source Middleware.
+                        </li>
+                    </ol>
+                    <p style="margin-top: 15px; background: #fff3cd; padding: 10px; border-radius: 4px; border-left: 4px solid #ffc107;">
+                        <strong>🔑 Key Point:</strong> The Source Middleware ensures <code>context.braze_id</code> is added to <strong>ALL</strong> events (not just Braze), making it available across your entire Segment ecosystem including warehouses and other destinations.
+                    </p>
+                </div>
+
+                <div class="test-steps">
+                    <h2>🧪 Testing Steps</h2>
+
+                    <!-- Step 1: Check Current State -->
+                    <div class="step">
+                        <div class="step-header">
+                            <div class="step-number">1</div>
+                            <div class="step-title">Check Initial State & Braze Device ID</div>
+                        </div>
+                        <div class="step-description">
+                            Check the status panel to see the current Segment Anonymous ID, local storage contents, and Braze SDK device_id before triggering any actions.
+                        </div>
+                        <div class="code-block">
+                            <pre><span style="color: #6A9955;">// Check current state</span>
+<span style="color: #DCDCAA;">console</span>.<span style="color: #DCDCAA;">log</span>(<span style="color: #CE9178;">'Segment Anonymous ID:'</span>, <span style="color: #9CDCFE;">analytics</span>.<span style="color: #DCDCAA;">user</span>().<span style="color: #DCDCAA;">anonymousId</span>());
+<span style="color: #DCDCAA;">console</span>.<span style="color: #DCDCAA;">log</span>(<span style="color: #CE9178;">'localStorage braze_id:'</span>, <span style="color: #9CDCFE;">localStorage</span>.<span style="color: #DCDCAA;">getItem</span>(<span style="color: #CE9178;">'braze_id'</span>));
+
+<span style="color: #6A9955;">// Check Braze SDK device_id</span>
+<span style="color: #C586C0;">if</span> (<span style="color: #9CDCFE;">window</span>.<span style="color: #9CDCFE;">braze</span> && <span style="color: #9CDCFE;">window</span>.<span style="color: #9CDCFE;">braze</span>.<span style="color: #9CDCFE;">getDeviceId</span>) {
+    <span style="color: #DCDCAA;">console</span>.<span style="color: #DCDCAA;">log</span>(<span style="color: #CE9178;">'Braze device_id:'</span>, <span style="color: #9CDCFE;">window</span>.<span style="color: #9CDCFE;">braze</span>.<span style="color: #DCDCAA;">getDeviceId</span>());
+}</pre>
+                        </div>
+                        <button class="btn" onclick="runStep1()">Run Step 1 - Check Status</button>
+                        <div class="step-note">
+                            💡 Verify your anonymousId is generated (UUID), check if Braze SDK is loaded, and see if device_id is available.
+                        </div>
+                    </div>
+
+                    <!-- Step 2: Clear State (Reset) -->
+                    <div class="step">
+                        <div class="step-header">
+                            <div class="step-number">2</div>
+                            <div class="step-title">Reset Everything (Same as RESET CLIENT Button)</div>
+                        </div>
+                        <div class="step-description">
+                            Clears all Segment identity, Braze SDK session data, cookies, and localStorage. This uses the same functionality as the "RESET CLIENT" button in the header. The page will reload after clearing.
+                        </div>
+                        <div class="code-block">
+                            <pre><span style="color: #6A9955;">// Full reset - clears all state</span>
+<span style="color: #DCDCAA;">resetEverything</span>();
+
+<span style="color: #6A9955;">// Clears:</span>
+<span style="color: #6A9955;">// - Segment analytics.reset()</span>
+<span style="color: #6A9955;">// - All localStorage (ajs_*, braze_id, ab.storage.*)</span>
+<span style="color: #6A9955;">// - All cookies</span>
+<span style="color: #6A9955;">// - Reloads page</span></pre>
+                        </div>
+                        <button class="btn btn-secondary" onclick="runStep2()">Run Step 2 - Full Reset</button>
+                        <div class="step-note">
+                            💡 After reset, page will reload automatically. You'll have a completely fresh state for testing.
+                        </div>
+                    </div>
+                    
+                    <!-- Step 3: Client-Side Braze Device ID Lookup -->
+                    <div class="step">
+                        <div class="step-header">
+                            <div class="step-number">3</div>
+                            <div class="step-title">Get Braze Device ID from Client SDK</div>
+                        </div>
+                        <div class="step-description">
+                            Checks if the Braze Web SDK has a device_id available. If not available yet, triggers an identify call with stated_email/stated_phone to help initialize the Braze profile.
+                        </div>
+                        <div class="code-block">
+                            <pre><span style="color: #6A9955;">// Check for Braze SDK device_id</span>
+<span style="color: #C586C0;">if</span> (<span style="color: #9CDCFE;">window</span>.<span style="color: #9CDCFE;">braze</span> && <span style="color: #9CDCFE;">window</span>.<span style="color: #9CDCFE;">braze</span>.<span style="color: #9CDCFE;">getDeviceId</span>) {
+    <span style="color: #C586C0;">const</span> <span style="color: #9CDCFE;">deviceId</span> = <span style="color: #9CDCFE;">window</span>.<span style="color: #9CDCFE;">braze</span>.<span style="color: #DCDCAA;">getDeviceId</span>();
+    
+    <span style="color: #C586C0;">if</span> (<span style="color: #9CDCFE;">deviceId</span>) {
+        <span style="color: #6A9955;">// Store device_id</span>
+        <span style="color: #9CDCFE;">localStorage</span>.<span style="color: #DCDCAA;">setItem</span>(<span style="color: #CE9178;">'braze_id'</span>, <span style="color: #9CDCFE;">deviceId</span>);
+    } <span style="color: #C586C0;">else</span> {
+        <span style="color: #6A9955;">// No device_id yet - trigger identify to initialize</span>
+        <span style="color: #9CDCFE;">analytics</span>.<span style="color: #DCDCAA;">identify</span>({
+            <span style="color: #9CDCFE;">stated_email</span>: <span style="color: #CE9178;">'test@example.com'</span>,
+            <span style="color: #9CDCFE;">stated_phone</span>: <span style="color: #CE9178;">'+1-555-1234'</span>
+        });
+    }
+}</pre>
+                        </div>
+                        <button class="btn" onclick="runStep3()">Run Step 3 - Get Device ID</button>
+                        <div class="step-note">
+                            💡 If no device_id is found, an identify call is made. Wait 3-5 seconds for Braze to initialize, then proceed to Step 4.
+                        </div>
+                    </div>
+                    
+                    <!-- Step 4: Inject Device ID into Context -->
+                    <div class="step">
+                        <div class="step-header">
+                            <div class="step-number">4</div>
+                            <div class="step-title">Check & Inject Device ID into Events</div>
+                        </div>
+                        <div class="step-description">
+                            Checks if Braze device_id is now available (likely from the /data network request after Step 3), then sends a Track event with the device_id injected into <code>context.device.id</code> per the <a href="https://segment.com/docs/connections/spec/common/" target="_blank">Segment Spec</a>.
+                        </div>
+                        <div class="code-block">
+                            <pre><span style="color: #6A9955;">// Check if device_id is available</span>
+<span style="color: #C586C0;">const</span> <span style="color: #9CDCFE;">deviceId</span> = <span style="color: #9CDCFE;">window</span>.<span style="color: #9CDCFE;">braze</span>.<span style="color: #DCDCAA;">getDeviceId</span>();
+
+<span style="color: #C586C0;">if</span> (<span style="color: #9CDCFE;">deviceId</span>) {
+    <span style="color: #6A9955;">// Send track event with device_id in context</span>
+    <span style="color: #9CDCFE;">analytics</span>.<span style="color: #DCDCAA;">track</span>(<span style="color: #CE9178;">'Test Event'</span>, {
+        <span style="color: #9CDCFE;">order_id</span>: <span style="color: #CE9178;">'TEST-123'</span>,
+        <span style="color: #9CDCFE;">revenue</span>: <span style="color: #B5CEA8;">99.99</span>
+    }, {
+        <span style="color: #9CDCFE;">device</span>: {
+            <span style="color: #9CDCFE;">id</span>: <span style="color: #9CDCFE;">deviceId</span>  <span style="color: #6A9955;">// Segment Spec: context.device.id</span>
+        }
+    });
+}</pre>
+                        </div>
+                        <button class="btn" onclick="runStep4()">Run Step 4 - Inject Device ID</button>
+                        <div class="step-note">
+                            💡 Check the console log JSON payload to verify <code>context.device.id</code> contains the Braze device_id. This follows the Segment Common Fields spec.
+                        </div>
+                    </div>
+                    
+                    <!-- Step 5: Simulate Braze ID NOT found -->
+                    <div class="step">
+                        <div class="step-header">
+                            <div class="step-number">5</div>
+                            <div class="step-title">Simulate Braze ID Not Found</div>
+                        </div>
+                        <div class="step-description">
+                            Runs the lookup process, simulating a response where no Braze user is found for the given Anonymous ID. This should clear the `braze_id` from `localStorage`.
+                        </div>
+                        <div class="code-block">
+                            <pre>// Triggers lookup, returns N/A (clears braze_id if present)
+fetchBrazeIDNow('N/A');
+
+// Expected: braze_id is cleared from localStorage</pre>
+                        </div>
+                        <button class="btn" onclick="runStep5()">Run Step 5 - No Braze ID Found</button>
+                        <div class="step-note">
+                            💡 Verify the `braze_id` in the Status Panel changes back to 'None'. Send a follow-up Track event (Step 4) to ensure `context.braze_id` is no longer injected.
+                        </div>
+                    </div>
+                    
+
+                </div>
+            </div>
+
+            <!-- RIGHT COLUMN: Results -->
+            <div class="right-column">
+
+                <div class="status-panel">
+                    <h3>📊 Segment & Persistence Status</h3>
+                    
+                    <!-- Segment Anonymous ID -->
+                    <div class="status-item">
+                        <span class="status-label">Client Anonymous ID:</span>
+                        <span class="status-value" id="anonymousId">Loading...</span>
+                    </div>
+
+                    <!-- Segment Local Storage Cookies -->
+                    <div class="status-item">
+                        <span class="status-label">LS: ajs_anonymous_id:</span>
+                        <span class="status-value" id="ajsAnonymousId">Loading...</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">LS: ajs_user_id (Segment ID):</span>
+                        <span class="status-value" id="ajsUserId">Loading...</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">LS: ajs_user_traits:</span>
+                        <span class="status-value" id="ajsUserTraits">Loading...</span>
+                    </div>
+                    
+                    <!-- Braze ID Status -->
+                    <div class="status-item">
+                        <span class="status-label">LS: **braze_id** (Middleware):</span>
+                        <span class="status-value error" id="brazeIdStatus">Loading...</span>
+                    </div>
+                    
+                    <!-- Braze SDK Device ID -->
+                    <div class="status-item">
+                        <span class="status-label">🔥 Braze SDK device_id:</span>
+                        <span class="status-value error" id="brazeDeviceId">Loading...</span>
+                    </div>
+                </div>
+
+                <div class="console-panel">
+                    <h3>📝 Console Log (Segment Events, API Requests/Responses)</h3>
+                    <div class="console-log" id="consoleLog">
+                        <div class="log-entry log-info">📋 Console output will appear here...</div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- IMPLEMENTATION GUIDE SECTION -->
+        <div style="max-width: 1400px; margin: 40px auto; padding: 30px; background: #f8f9fa; border-radius: 8px; border: 2px solid #dee2e6;">
+            <h2 style="color: #333; margin-bottom: 20px; font-size: 2em;">📋 Implementation Guide (Logic Only)</h2>
+            <p style="color: #666; line-height: 1.6; margin-bottom: 20px;">
+                The core logic consists of <strong>three parts</strong>: (1) a delayed lookup function that fetches the Braze ID from the external API, (2) a <strong>Source Middleware</strong> that injects the Braze ID into <strong>all</strong> Segment events, and (3) an optional <strong>Destination Middleware</strong> for Braze-specific logic. All middleware must be registered immediately after the Segment snippet.
+            </p>
+            <div style="background: #fff; border: 1px solid #dee2e6; border-radius: 6px; padding: 20px; margin-bottom: 20px;">
+                <h3 style="color: #555; margin-bottom: 15px; font-size: 1.2em;">📦 Complete Braze ID Lookup and Injection Code</h3>
+                <div style="background: #2d2d2d; color: #f8f8f2; padding: 20px; border-radius: 6px; overflow-x: auto; font-family: 'Courier New', monospace; font-size: 0.9em; line-height: 1.6;">
+                    <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">&lt;script type="text/javascript"&gt;
+
+// ===============================
+// CONFIGURATION: REPLACE THESE PLACEHOLDERS
+// ===============================
+const BRAZE_ENDPOINT = "https://rest.iad-01.braze.com/users/export/ids";
+const BRAZE_API_KEY = "Bearer YOUR_BRAZE_REST_API_KEY"; // Your Braze REST API Key
+
+// ===============================
+// 1. DELAYED LOOKUP FUNCTION
+// Fetches Braze ID from external API using anonymousId [3, 10]
+// ===============================
+(function waitForAnalytics() {
+    if (!window.analytics || !window.analytics.ready) {
+        return setTimeout(waitForAnalytics, 500);
+    }
+
+    analytics.ready(() => {
+        // Wait 30 seconds before attempting lookup [3]
+        setTimeout(() => {
+            const anonymousId = analytics.user().anonymousId();
+
+            if (!anonymousId) {
+                console.warn("[Middleware] No anonymousId found. Skipping Braze lookup.");
+                return;
+            }
+
+            const payload = {
+                external_ids: [anonymousId]
+            };
+
+            // Make real API call to Braze Export endpoint [10]
+            fetch(BRAZE_ENDPOINT, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": BRAZE_API_KEY
+                },
+                body: JSON.stringify(payload)
+            })
+            .then(response => {
+                if (!response.ok) {
+                    console.error("[Middleware] Braze API error:", response.status);
+                    return response.text().then(text => {
+                        console.error("[Middleware] Response:", text);
+                        throw new Error(\`Braze API error: \${response.status}\`);
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Extract braze_id from response [7]
+                const brazeId = data?.users?.[0]?.braze_id;
+
+                if (brazeId) {
+                    // Store in localStorage for persistence [7]
+                    localStorage.setItem("braze_id", brazeId);
+                    
+                    // Identify call to sync with Segment traits [7]
+                    analytics.identify({ braze_id: brazeId });
+                    
+                    console.log("[Middleware] Braze ID retrieved:", brazeId);
+                } else {
+                    console.warn("[Middleware] No Braze ID found for anonymous user.");
+                }
+            })
+            .catch(err => {
+                console.error("[Middleware] Error fetching Braze ID:", err);
+            });
+
+        }, 30000); // 30 second delay [3]
+    });
+})();
+
+// ===============================
+// 2. SOURCE MIDDLEWARE
+// Injects braze_id into ALL Segment events [6]
+// ===============================
+analytics.addSourceMiddleware(({ payload, next }) => {
+    const brazeId = localStorage.getItem("braze_id");
+    
+    if (brazeId) {
+        payload.obj.context = payload.obj.context || {};
+        payload.obj.context.braze_id = brazeId;
+    }
+    
+    next(payload);
+});
+
+// ===============================
+// 3. DESTINATION MIDDLEWARE (Optional)
+// For Braze-specific transformations [6]
+// ===============================
+analytics.addDestinationMiddleware("Braze Web Mode (Actions)", ({ payload, next }) => {
+    const brazeId = localStorage.getItem("braze_id");
+    
+    if (brazeId) {
+        payload.obj.context = payload.obj.context || {};
+        payload.obj.context.braze_id = brazeId;
+    }
+    
+    next(payload);
+});
+
+&lt;/script&gt;</pre>
+                </div>
+            </div>
+
+            <div style="background: #d1ecf1; border: 1px solid #17a2b8; border-radius: 6px; padding: 20px; margin-top: 20px;">
+                <h3 style="color: #0c5460; margin-bottom: 15px; font-size: 1.2em;">💡 How the Middleware Works (Summary Template Pattern)</h3>
+                <div style="color: #0c5460; line-height: 1.8;">
+
+                    <p style="margin-bottom: 15px;"><strong>1. Delayed Lookup Pattern</strong> (External API Fetch [3, 10])</p>
+                    <ul style="margin-left: 20px; margin-bottom: 20px;">
+                        <li>The middleware uses a <strong>30-second delay</strong> after page load to fetch the Braze ID [3].</li>
+                        <li>It makes a <strong>real external REST API call</strong> to Braze's <code>/users/export/ids</code> endpoint using the Segment <code>anonymousId</code> as the lookup key [10].</li>
+                        <li>The retrieved <code>braze_id</code> is stored in <code>localStorage</code> for persistence across page loads [7].</li>
+                        <li>An <code>analytics.identify()</code> call is made to sync the Braze ID with Segment traits [7].</li>
+                    </ul>
+
+                    <p style="margin-bottom: 15px;"><strong>2. Source Middleware Injection</strong> (Universal Context Enrichment [6])</p>
+                    <ul style="margin-left: 20px; margin-bottom: 20px;">
+                        <li>The middleware is registered as a <strong>Source Middleware</strong> [6], which intercepts <strong>all</strong> Segment events before they're sent to any destination.</li>
+                        <li>For every outgoing event, it checks <code>localStorage</code> for the <code>braze_id</code> [6].</li>
+                        <li>If found, it injects the value into <code>payload.obj.context.braze_id</code> [6], ensuring <strong>ALL</strong> downstream destinations receive the identifier (warehouses, analytics tools, Braze, etc.).</li>
+                        <li>This pattern allows for <strong>asynchronous enrichment</strong>: the lookup happens once, and all subsequent events automatically include the Braze ID without additional API calls.</li>
+                    </ul>
+
+                    <p style="margin-bottom: 15px;"><strong>3. Destination Middleware (Optional)</strong> (Braze-Specific Logic [6])</p>
+                    <ul style="margin-left: 20px; margin-bottom: 20px;">
+                        <li>A <strong>Destination Middleware</strong> is also registered specifically for "Braze Web Mode (Actions)" [6].</li>
+                        <li>This allows for additional Braze-specific transformations or ensures the <code>braze_id</code> is present even if the Source Middleware failed.</li>
+                        <li>Acts as a safety net and provides flexibility for Braze-only customizations.</li>
+                    </ul>
+
+                    <p style="margin-bottom: 15px;"><strong>4. Key Benefits</strong></p>
+                    <ul style="margin-left: 20px;">
+                        <li><strong>Performance:</strong> Only one API call is made, stored in localStorage for future use.</li>
+                        <li><strong>Persistence:</strong> Braze ID survives page reloads via localStorage.</li>
+                        <li><strong>Universal Availability:</strong> Braze ID is available in <strong>all</strong> destinations, not just Braze (warehouses, other analytics tools, etc.).</li>
+                        <li><strong>Automatic Injection:</strong> All events get enriched automatically without manual code in each event call.</li>
+                        <li><strong>Anonymous to Known User:</strong> Enables linking anonymous browsing behavior to known Braze profiles.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</body>
+
+</html>
