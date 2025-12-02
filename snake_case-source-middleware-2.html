@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Snake Case Conversion Middleware Testing</title>
+
+    <script type="text/javascript">
+        // ===============================
+        // STEP 1: SEGMENT ANALYTICS SNIPPET (Part A)
+        // ===============================
+        !function() {
+            var analytics = window.analytics = window.analytics || [];
+            if (!analytics.initialize)
+                if (analytics.invoked)
+                    window.console && console.error && console.error("Segment snippet included twice.");
+                else {
+                    analytics.invoked = !0;
+                    analytics.methods = ["trackSubmit", "trackClick", "trackLink", "trackForm", "pageview", "identify", "reset", "group", "track", "ready", "alias", "debug", "page", "once", "off", "on", "addSourceMiddleware", "addIntegrationMiddleware", "setAnonymousId", "addDestinationMiddleware"];
+                    analytics.factory = function(e) { return function() { var t = Array.prototype.slice.call(arguments); t.unshift(e); analytics.push(t); return analytics } };
+                    for (var e = 0; e < analytics.methods.length; e++) {
+                        var key = analytics.methods[e];
+                        analytics[key] = analytics.factory(key)
+                    }
+                    analytics.load = function(key, e) {
+                        var t = document.createElement("script");
+                        t.type = "text/javascript";
+                        t.async = !0;
+                        t.src = "https://cdn.segment.com/analytics.js/v1/" + key + "/analytics.min.js";
+                        var n = document.getElementsByTagName("script");
+                        n.parentNode.insertBefore(t, n);
+                        analytics._loadOptions = e
+                    };
+                    // *** REPLACE WITH YOUR WRITE KEY *** [4]
+                    analytics._writeKey = "YOUR_WRITE_KEY_HERE";
+                    analytics.SNIPPET_VERSION = "4.15.3";
+                    // *** REPLACE WITH YOUR WRITE KEY ***
+                    analytics.load("YOUR_WRITE_KEY_HERE");
+                    analytics.page();
+                }
+        }();
+
+        // ===============================
+        // STEP 2: EVENT LOGGER MIDDLEWARE (Part B)
+        // Logs all Segment events to the UI console [5]
+        // ===============================
+        analytics.addSourceMiddleware(function({
+            payload,
+            next
+        }) {
+            // Log event to UI console
+            setTimeout(function() {
+                if (typeof logToConsole === 'function') {
+                    const eventType = payload.obj.type;
+                    const eventName = payload.obj.event || payload.obj.name || eventType;
+                    logToConsole(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, 'info');
+                    logToConsole(`📡 ${eventType.toUpperCase()} Event: ${eventName}`, 'success');
+                    logToConsole(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, 'info');
+                    // Display full payload as formatted JSON
+                    const jsonPayload = JSON.stringify(payload.obj, null, 2);
+                    logToConsole(jsonPayload, 'json');
+                    logToConsole(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, 'info');
+                } else {
+                    // Fallback to browser console if UI not ready
+                    console.log('[EVENT LOGGER] Event captured:', payload.obj.type, payload.obj.event || '', payload.obj);
+                }
+            }, 50);
+            // Continue event pipeline
+            next(payload);
+        });
+        console.log('[EVENT LOGGER] Middleware registered - all events will be logged to UI console');
+
+
+        // ===============================
+        // STEP 3: SNAKE CASE CONVERSION MIDDLEWARE (Part C)
+        // Converts event names, properties keys, and traits keys to snake_case.
+        // ===============================
+
+        /**
+         * Converts a string to snake_case, handling spaces, camel/pascal case, and multiple underscores.
+         * Examples: "FirstName" -> "first_name", "first Name" -> "first_name", "Firstname" -> "first_name"
+         */
+        function toSnakeCase(str) {
+            if (!str) return str;
+
+            // 1. Convert spaces, multiple capitals, and camel/pascal case to underscore separation
+            let result = str.replace(/([A-Z])/g, '_$1');
+            
+            // 2. Replace illegal characters and multiple underscores with a single underscore
+            result = result.replace(/[\s\W]+/g, '_'); 
+            result = result.replace(/__+/g, '_'); 
+            
+            // 3. Convert to lowercase and trim leading/trailing underscores
+            return result.toLowerCase().replace(/^_|_$/g, '');
+        }
+
+        /**
+         * Recursively iterates over object keys and converts them to snake_case.
+         */
+        function recurseKeysToSnake(obj) {
+            // Stop recursion if it's not a mutable object
+            if (typeof obj !== 'object' || obj === null) return obj;
+
+            // Handle arrays recursively
+            if (Array.isArray(obj)) {
+                return obj.map(item => recurseKeysToSnake(item));
+            }
+
+            // Handle objects: convert keys and recurse on values
+            const newObj = {};
+            for (const key in obj) {
+                if (Object.prototype.hasOwnProperty.call(obj, key)) {
+                    const newKey = toSnakeCase(key);
+                    newObj[newKey] = recurseKeysToSnake(obj[key]);
+                }
+            }
+            return newObj;
+        }
+
+
+        const caseConverterMiddleware = function({
+            payload,
+            next
+        }) {
+            try {
+                const event = payload.obj;
+                const eventType = event.type;
+                
+                // Track event (event name and properties keys)
+                if (eventType === 'track') {
+                    if (event.event) {
+                        event.event = toSnakeCase(event.event);
+                    }
+                    if (event.properties) {
+                        event.properties = recurseKeysToSnake(event.properties);
+                    }
+                } 
+                // Page event (page name and properties keys)
+                else if (eventType === 'page') {
+                    // Page name conversion
+                    if (event.name) {
+                        event.name = toSnakeCase(event.name);
+                    }
+                    // Page properties conversion
+                    if (event.properties) {
+                        event.properties = recurseKeysToSnake(event.properties);
+                    }
+                } 
+                // Identify or Group events (traits keys)
+                else if (eventType === 'identify' || eventType === 'group') {
+                    if (event.traits) {
+                        event.traits = recurseKeysToSnake(event.traits);
+                    }
+                }
+
+                logToConsole(`[CASE CONVERTER] Mutated ${eventType} payload keys to snake_case.`, 'gclid');
+
+                // Pass the modified payload along
+                next(payload);
+
+            } catch (e) {
+                console.error('[Middleware Error] Case Converter:', e);
+                next(payload); // fail open
+            }
+        };
+
+        // Register the source middleware
+        analytics.addSourceMiddleware(caseConverterMiddleware);
+        console.log('[Case Converter] Source Middleware registered.');
+
+
+        // ===============================
+        // UI HELPER FUNCTIONS (Part E)
+        // ===============================
+        function logToConsole(message, type = 'info') {
+            const consoleLog = document.getElementById('consoleLog');
+            if (!consoleLog) {
+                console.error('Console log element not found!');
+                return;
+            }
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            const timestamp = new Date().toLocaleTimeString();
+
+            if (type === 'json') {
+                entry.innerHTML = `<span style="color: #9cdcfe;">[${timestamp}]</span> ${syntaxHighlightJSON(message)}`;
+            } else {
+                entry.textContent = `[${timestamp}] ${message}`;
+            }
+
+            consoleLog.appendChild(entry);
+            consoleLog.scrollTop = consoleLog.scrollHeight;
+            console.log(message);
+        }
+
+        function syntaxHighlightJSON(json) {
+            let obj = typeof json === 'string' ? JSON.parse(json) : json;
+            let formatted = JSON.stringify(obj, null, 2);
+            formatted = formatted
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function(match) {
+                    let cls = 'number';
+                    if (/^"/.test(match)) {
+                        if (/:$/.test(match)) {
+                            cls = 'key';
+                            match = match.slice(0, -1);
+                            return '<span style="color: #9cdcfe;">' + match + '</span><span style="color: #d4d4d4;">:</span>';
+                        } else {
+                            cls = 'string';
+                            return '<span style="color: #ce9178;">' + match + '</span>';
+                        }
+                    } else if (/true|false/.test(match)) {
+                        cls = 'boolean';
+                        return '<span style="color: #569cd6;">' + match + '</span>';
+                    } else if (/null/.test(match)) {
+                        cls = 'null';
+                        return '<span style="color: #569cd6;">' + match + '</span>';
+                    } else {
+                        return '<span style="color: #b5cea8;">' + match + '</span>';
+                    }
+                });
+            return '<pre style="margin: 0; line-height: 1.6; font-family: \'Courier New\', monospace;">' + formatted + '</pre>';
+        }
+
+        function updateStatus(statusMessage) {
+            document.getElementById('routerStatus').textContent = statusMessage;
+        }
+        
+        // ===============================
+        // TEST STEP FUNCTIONS (Part F)
+        // ===============================
+
+        function runStep1_Track() {
+            logToConsole('[Step 1] Sending Track Event...', 'info');
+            if (typeof analytics !== 'undefined') {
+                analytics.track('Button Clicked', {
+                    buttonName: 'Submit Form',
+                    click_Id: 'cta_1',
+                    TestValue: 123,
+                    Multi__Word: 'data'
+                });
+                alert('✓ Step 1 Complete. Check Console Log to verify event name and property keys are snake_case.');
+            } else {
+                logToConsole('ERROR: Analytics not loaded', 'error');
+            }
+        }
+
+        function runStep2_Page() {
+            logToConsole('[Step 2] Sending Page Event...', 'info');
+            if (typeof analytics !== 'undefined') {
+                analytics.page('Products', 'Home Page View', {
+                    PageTitle: 'Welcome Home',
+                    page_Url: '/home',
+                    category_ID: 'cat1',
+                    ProductList: ['item_a', 'item_b']
+                });
+                alert('✓ Step 2 Complete. Check Console Log to verify page name and property keys are snake_case.');
+            } else {
+                logToConsole('ERROR: Analytics not loaded', 'error');
+            }
+        }
+
+        function runStep3_Identify() {
+            logToConsole('[Step 3] Sending Identify Event...', 'info');
+            if (typeof analytics !== 'undefined') {
+                analytics.identify('user_123', {
+                    FirstName: 'Jane',
+                    lastName: 'Doe',
+                    Email_Address: 'jane@example.com',
+                    User_ID: 'user_123',
+                    User_Type: 'admin'
+                });
+                alert('✓ Step 3 Complete. Check Console Log to verify trait keys are snake_case.');
+            } else {
+                logToConsole('ERROR: Analytics not loaded', 'error');
+            }
+        }
+
+        function runStep4_Group() {
+            logToConsole('[Step 4] Sending Group Event...', 'info');
+            if (typeof analytics !== 'undefined') {
+                analytics.group('group_999', {
+                    AccountTier: 'Enterprise',
+                    companyName: 'ACME Corp',
+                    annualRevenue: 1000000,
+                    Billing_Status: 'Active'
+                });
+                alert('✓ Step 4 Complete. Check Console Log to verify group trait keys are snake_case.');
+            } else {
+                logToConsole('ERROR: Analytics not loaded', 'error');
+            }
+        }
+
+
+        // ===============================
+        // INITIALIZATION LOGIC (Part H)
+        // ===============================
+        document.addEventListener('DOMContentLoaded', function() {
+            const consoleLog = document.getElementById('consoleLog');
+            if (consoleLog) {
+                consoleLog.innerHTML = '';
+                logToConsole('🚀 Page loaded, initializing...', 'info');
+                logToConsole('⏳ Waiting for Analytics.js and middleware registration...', 'info');
+            }
+        });
+
+        analytics.ready(function() {
+            logToConsole('✅ Analytics.js loaded and ready', 'success');
+            updateStatus('Active');
+        });
+
+    </script>
+
+    <!-- =============================== -->
+    <!-- CSS STYLING (Based on GCLID : template) -->
+    <!-- =============================== -->
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; min-height: 100vh; }
+        .container { max-width: 1700px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2); overflow: hidden; }
+        .content { display: grid; grid-template-columns: 1fr 500px; gap: 0; min-height: calc(100vh - 200px); }
+        .left-column { padding: 30px; overflow-y: auto; max-height: calc(100vh - 200px); border-right: 2px solid #e0e0e0; }
+        .right-column { padding: 15px; background: #f8f9fa; overflow-y: auto; max-height: calc(100vh - 200px); position: sticky; top: 0; }
+        header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; }
+        h1 { font-size: 2.5em; margin-bottom: 10px; }
+        .subtitle { font-size: 1.1em; opacity: 0.9; }
+        .info-box { background: #e7f3ff; border-left: 4px solid #2196F3; padding: 20px; margin-bottom: 30px; border-radius: 4px; }
+        .info-box h2 { color: #1976D2; margin-bottom: 10px; font-size: 1.3em; }
+        .info-box p { line-height: 1.6; color: #555; }
+        .test-steps h2 { margin-bottom: 20px; color: #333; }
+        .status-panel { background: white; border: 2px solid #dee2e6; border-radius: 8px; padding: 2%; margin-bottom: 10px; max-height: 30%; }
+        .status-panel h3 { margin-bottom: 10px; color: #333; font-size: 1em; }
+        .status-item { display: flex; justify-content: space-between; padding: 10px; background: white; margin-bottom: 10px; border-radius: 4px; border: 1px solid #e0e0e0; }
+        .status-label { font-size: .8em; font-weight: 600; color: #555; }
+        .status-value { font-size: .7em; font-family: 'Courier New', monospace; color: #667eea; word-break: break-all; }
+        .test-steps { margin-top: 30px; }
+        .step { background: white; border: 2px solid #e0e0e0; border-radius: 8px; padding: 20px; margin-bottom: 20px; transition: all 0.3s; }
+        .step:hover { border-color: #667eea; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15); }
+        .step-header { display: flex; align-items: center; margin-bottom: 15px; }
+        .step-number { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 1.2em; margin-right: 15px; }
+        .step-title { font-size: 1.3em; color: #333; font-weight: 600; }
+        .step-description { color: #666; line-height: 1.6; margin-bottom: 15px; }
+        .code-block { background: #2d2d2d; color: #f8f8f2; padding: 15px; border-radius: 6px; overflow-x: auto; margin-bottom: 15px; font-family: 'Courier New', monospace; font-size: 0.9em; }
+        .code-block pre { margin: 0; }
+        .step-note { background: #fff9e6; border-left: 4px solid #ffc107; padding: 12px; margin-top: 15px; border-radius: 4px; font-size: 0.95em; color: #666; }
+        .btn { background: linear-gradient(135deg, #28a745 0%, #195f29 100%); color: white; border: none; padding: 12px 24px; border-radius: 6px; font-size: 1em; font-weight: 600; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3); }
+        .btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(40, 167, 69, 0.4); }
+        .btn:active { transform: translateY(0); }
+        .btn-secondary { background: #6c757d; box-shadow: 0 2px 8px rgba(108, 117, 125, 0.3); }
+        .btn-group { display: flex; gap: 10px; margin-top: 15px; }
+        .success { color: #4ec9b0; font-weight: bold; }
+        .error { color: #f48771; font-weight: bold; }
+        .console-panel { background: white; border: 2px solid #dee2e6; border-radius: 8px; padding: 2%; height: 73%; }
+        .console-panel h3 { margin-bottom: 5px; color: #333; font-size: 1em; }
+        .console-log { background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 4px; height: 95%; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 0.85em; line-height: 1.5; }
+        .log-entry { margin-bottom: 5px; padding: 5px; border-radius: 3px; white-space: pre-wrap; word-break: break-word; }
+        .log-gclid { color: #9cdcfe; font-weight: bold; } /* Using blueish for Mutation Success */
+        .log-info { color: #9cdcfe; }
+        .log-success { color: #4ec9b0; }
+        .log-error { color: #f48771; font-weight: bold; }
+        .log-json { color: #ce9178; font-family: 'Courier New', monospace; font-size: 0.9em; white-space: pre-wrap; line-height: 1.6; }
+        footer { background: #f8f9fa; padding: 5px; text-align: center; color: #666; font-size: 0.75em; }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>🐍 Snake Case Conversion Source Middleware</h1>
+            <p class="subtitle">Converts all event names, properties keys, and traits keys to snake_case.</p>
+        </header>
+
+        <div class="content">
+            <!-- LEFT COLUMN: Test Steps -->
+            <div class="left-column">
+                <div class="info-box">
+                    <h2>Middleware Functionality</h2>
+                    <p>
+                        This **Source Middleware** [6-8] ensures data consistency by converting key strings within the payload to `snake_case` before the event is sent to Segment.
+                    </p>
+                    <p style="margin-top: 10px;">
+                        **Conversions Handled:**
+                        <ul>
+                            <li>Event Name (`Track`, `Page`): "Button Clicked" → "button_clicked"</li>
+                            <li>Properties Keys (`Track`, `Page`): `buttonName` → `button_name`</li>
+                            <li>Traits Keys (`Identify`, `Group`): `FirstName` → `first_name`</li>
+                            <li>Normalization: Handles `First Name`, `firstname`, `first_name`, and `first__name` by converting them all to `first_name`.</li>
+                        </ul>
+                    </p>
+                </div>
+
+                <div class="test-steps">
+                    <h2>🧪 Testing Steps</h2>
+
+                    <!-- Step 1: Track Event Name & Properties -->
+                    <div class="step" id="step1">
+                        <div class="step-header">
+                            <div class="step-number">1</div>
+                            <div class="step-title">Test Track Event (Name & Properties)</div>
+                        </div>
+                        <div class="step-description">
+                            Send a <code>Track</code> event with mixed casing in the event name ("Button Clicked") and properties keys (`buttonName`, `TestValue`, `Multi__Word`).
+                        </div>
+                        <div class="code-block">
+                            <pre>analytics.track('Button Clicked', {
+    buttonName: 'Submit Form',
+    click_Id: 'cta_1',
+    TestValue: 123,
+    Multi__Word: 'data'
+});</pre>
+                        </div>
+                        <button class="btn" onclick="runStep1_Track()">Run Step 1 - Send Track Event</button>
+                        <div class="step-note">
+                            💡 Expected: Event name becomes `button_clicked`, and all property keys adopt `snake_case` (e.g., `button_name`, `test_value`, `multi_word`).
+                        </div>
+                    </div>
+
+                    <!-- Step 2: Page Event Name & Properties -->
+                    <div class="step" id="step2">
+                        <div class="step-header">
+                            <div class="step-number">2</div>
+                            <div class="step-title">Test Page Event (Name & Properties)</div>
+                        </div>
+                        <div class="step-description">
+                            Send a <code>Page</code> event with a mixed page name ("Home Page View") and mixed properties keys (`PageTitle`, `page_Url`, `category_ID`).
+                        </div>
+                        <div class="code-block">
+                            <pre>analytics.page('Products', 'Home Page View', {
+    PageTitle: 'Welcome Home',
+    page_Url: '/home',
+    category_ID: 'cat1'
+});</pre>
+                        </div>
+                        <button class="btn" onclick="runStep2_Page()">Run Step 2 - Send Page Event</button>
+                        <div class="step-note">
+                            💡 Expected: Page name becomes `home_page_view`, and properties keys adopt `snake_case` (e.g., `page_title`, `page_url`, `category_id`).
+                        </div>
+                    </div>
+
+                    <!-- Step 3: Identify Event Traits -->
+                    <div class="step" id="step3">
+                        <div class="step-header">
+                            <div class="step-number">3</div>
+                            <div class="step-title">Test Identify Event (Traits Keys)</div>
+                        </div>
+                        <div class="step-description">
+                            Send an <code>Identify</code> call with trait keys using PascalCase (`FirstName`), camelCase (`lastName`), and underscores (`Email_Address`).
+                        </div>
+                        <div class="code-block">
+                            <pre>analytics.identify('user_123', {
+    FirstName: 'Jane',
+    lastName: 'Doe',
+    Email_Address: 'jane@example.com',
+    User_Type: 'admin'
+});</pre>
+                        </div>
+                        <button class="btn" onclick="runStep3_Identify()">Run Step 3 - Send Identify Event</button>
+                        <div class="step-note">
+                            💡 Expected: Trait keys become `first_name`, `last_name`, `email_address`, and `user_type`.
+                        </div>
+                    </div>
+
+                    <!-- Step 4: Group Event Traits -->
+                    <div class="step" id="step4">
+                        <div class="step-header">
+                            <div class="step-number">4</div>
+                            <div class="step-title">Test Group Event (Traits Keys)</div>
+                        </div>
+                        <div class="step-description">
+                            Send a <code>Group</code> call to verify trait mutation works consistently across all identity methods.
+                        </div>
+                        <div class="code-block">
+                            <pre>analytics.group('group_999', {
+    AccountTier: 'Enterprise',
+    companyName: 'ACME Corp',
+    annualRevenue: 1000000,
+    Billing_Status: 'Active'
+});</pre>
+                        </div>
+                        <button class="btn" onclick="runStep4_Group()">Run Step 4 - Send Group Event</button>
+                        <div class="step-note">
+                            💡 Expected: Trait keys become `account_tier`, `company_name`, `annual_revenue`, and `billing_status`.
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- RIGHT COLUMN: Results -->
+            <div class="right-column">
+                <div class="status-panel">
+                    <h3>📊 Current Status</h3>
+                    <div class="status-item">
+                        <span class="status-label">Middleware Target:</span>
+                        <span class="status-value">Source (All Events)</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Middleware Status:</span>
+                        <span class="status-value success" id="routerStatus">Loading...</span>
+                    </div>
+                </div>
+
+                <div class="console-panel">
+                    <h3>📝 Console Log (Event Payloads)</h3>
+                    <div class="console-log" id="consoleLog">
+                        <div class="log-entry log-info">📋 Console output will appear here...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- IMPLEMENTATION GUIDE SECTION -->
+        <div style="max-width: 1400px; margin: 40px auto; padding: 30px; background: #f8f9fa; border-radius: 8px; border: 2px solid #dee2e6;">
+            <h2 style="color: #333; margin-bottom: 20px; font-size: 2em;">📋 Implementation Guide</h2>
+
+            <p style="color: #666; line-height: 1.6; margin-bottom: 20px;">
+                To implement the **Snake Case Conversion Source Middleware** in your production environment, integrate the following script into your website's <code>&lt;head&gt;</code> section, immediately following the Segment Analytics.js snippet.
+            </p>
+
+            <div style="background: #fff; border: 1px solid #dee2e6; border-radius: 6px; padding: 20px; margin-bottom: 20px;">
+                <h3 style="color: #555; margin-bottom: 15px; font-size: 1.2em;">📦 Complete Implementation Code (Logic Only)</h3>
+
+                <div style="background: #2d2d2d; color: #f8f8f2; padding: 20px; border-radius: 6px; overflow-x: auto; font-family: 'Courier New', monospace; font-size: 0.9em; line-height: 1.6;">
+
+<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">&lt;script type="text/javascript"&gt;
+
+// --- Helper functions ---
+
+function toSnakeCase(str) {
+    if (!str) return str;
+    let result = str.replace(/([A-Z])/g, '_$1');
+    result = result.replace(/[\s\W]+/g, '_'); 
+    result = result.replace(/__+/g, '_'); 
+    return result.toLowerCase().replace(/^_|_$/g, '');
+}
+
+function recurseKeysToSnake(obj) {
+    if (typeof obj !== 'object' || obj === null) return obj;
+
+    if (Array.isArray(obj)) {
+        return obj.map(item => recurseKeysToSnake(item));
+    }
+
+    const newObj = {};
+    for (const key in obj) {
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+            const newKey = toSnakeCase(key);
+            newObj[newKey] = recurseKeysToSnake(obj[key]);
+        }
+    }
+    return newObj;
+}
+
+// --- Source Middleware Logic ---
+
+const caseConverterMiddleware = function({ payload, next }) {
+    try {
+        const event = payload.obj;
+        const eventType = event.type;
+
+        // Track events: Convert event name and properties keys
+        if (eventType === 'track') {
+            if (event.event) {
+                event.event = toSnakeCase(event.event);
+            }
+            if (event.properties) {
+                event.properties = recurseKeysToSnake(event.properties);
+            }
+        } 
+        // Page events: Convert page name and properties keys
+        else if (eventType === 'page') {
+            if (event.name) {
+                event.name = toSnakeCase(event.name);
+            }
+            if (event.properties) {
+                event.properties = recurseKeysToSnake(event.properties);
+            }
+        } 
+        // Identify or Group events: Convert traits keys
+        else if (eventType === 'identify' || eventType === 'group') {
+            if (event.traits) {
+                event.traits = recurseKeysToSnake(event.traits);
+            }
+        }
+
+        // Continue the event pipeline [9]
+        next(payload);
+
+    } catch (e) {
+        console.error('Case Converter Middleware error:', e);
+        next(payload); // fail open
+    }
+};
+
+analytics.addSourceMiddleware(caseConverterMiddleware);
+
+&lt;/script&gt;</pre>
+                </div>
+            </div>
+
+            <div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 6px; padding: 20px; margin-bottom: 20px;">
+                <h3 style="color: #856404; margin-bottom: 15px; font-size: 1.2em;">⚠️ Important Implementation Notes</h3>
+                <ul style="color: #856404; line-height: 1.8; margin-left: 20px;">
+                    <li>**Middleware Type:** This is a **Source Middleware** [6], running before the event reaches Segment servers or any destination integrations [7].</li>
+                    <li>**Payload Mutation:** The middleware explicitly mutates the `payload.obj` in place to change the casing of the keys [10].</li>
+                    <li>**Impact:** This ensures all downstream analytics and warehouse tools receive consistent `snake_case` data, regardless of how the developers instrumented the events in the `analytics.track()` or `analytics.identify()` calls.</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>
